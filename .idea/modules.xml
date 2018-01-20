@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/DistributedLock/DistributedLock.iml" filepath="$PROJECT_DIR$/DistributedLock/DistributedLock.iml" />
+      <module fileurl="file://$PROJECT_DIR$/FCommonUtils.iml" filepath="$PROJECT_DIR$/FCommonUtils.iml" />
+    </modules>
+  </component>
+</project>

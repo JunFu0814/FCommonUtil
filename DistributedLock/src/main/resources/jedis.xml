@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+
+<configuration>
+	<property>
+		<name>maxTotal</name>
+		<value>100</value>
+	</property>
+	<property>
+		<name>maxIdle</name>
+		<value>8</value>
+	</property>
+	<property>
+		<name>maxWaitMillis</name>
+		<value>100000</value>
+	</property>
+	<property>
+		<name>host</name>
+		<value>10.16.46.172</value>
+	</property>
+	<property>
+		<name>port</name>
+		<value>8008</value>
+	</property>
+	<property>
+		<name>timeOut</name>
+		<value>3000</value>
+	</property>
+
+</configuration>
