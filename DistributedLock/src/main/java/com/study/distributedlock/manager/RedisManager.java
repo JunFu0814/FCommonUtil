@@ -24,7 +24,7 @@ public class RedisManager {
         return jedis;
     }
 
-    public static JedisCluster createConnection()  {
+    private static JedisCluster createConnection()  {
         conf.addResource("jedis.xml");
         JedisPoolConfig config = new JedisPoolConfig();
         // 设置最大连接数
