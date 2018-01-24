@@ -27,7 +27,11 @@ public class KryoSerializationUtils {
     public static <T extends Serializable> byte[] serializationObject(T obj) {
 
         Kryo kryo = new Kryo();
-        kryo.setReferences(false);
+        //支持对象循环引用（否则会栈溢出）,默认weitrue
+        kryo.setReferences(true);
+        //不强制要求注册类（注册行为无法保证多个 JVM 内同一个类的注册编号相同；而且业务系统中大量的 Class 也难以一一注册）。默认false
+        kryo.setRegistrationRequired(false);
+        //注册类，这样可以减少jvm的开销，减少性能消耗
         kryo.register(obj.getClass());
         Output output = new Output(1,4096);
         kryo.writeObject(output,obj);
@@ -46,8 +50,7 @@ public class KryoSerializationUtils {
      */
     public static <T extends Serializable> T deserializationObject(byte[] data, Class<T> clazz) {
         Kryo kryo = new Kryo();
-        //kryo需要先注册，否则会比较耗内存
-        kryo.setReferences(false);
+        kryo.setReferences(true);
         kryo.register(clazz);
         ByteArrayInputStream bais = new ByteArrayInputStream(data);
         Input input = new Input(bais);
@@ -57,6 +60,7 @@ public class KryoSerializationUtils {
 
     public static <T extends Serializable> void serializationObject(String filename , T obj){
         Kryo kryo = new Kryo();
+        kryo.setReferences(true);
         kryo.register(obj.getClass(), new JavaSerializer());
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();

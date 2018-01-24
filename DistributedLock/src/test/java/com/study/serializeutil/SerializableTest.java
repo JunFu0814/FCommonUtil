@@ -82,7 +82,7 @@ public class SerializableTest {
 
         byte[] data=null;
         byte[] data1=null;
-        int size = 100;
+        int size = 100000;
         long start = System.currentTimeMillis();
         for(int i = 0;i < size;i ++){
             User user = new User("user" + i, i);
