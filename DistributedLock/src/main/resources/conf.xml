@@ -15,16 +15,24 @@
 		<value>100000</value>
 	</property>
 	<property>
-		<name>host</name>
+		<name>redis_host</name>
 		<value>10.16.46.172</value>
 	</property>
 	<property>
-		<name>port</name>
+		<name>redis_port</name>
 		<value>8008</value>
 	</property>
 	<property>
 		<name>timeOut</name>
 		<value>3000</value>
+	</property>
+	<property>
+		<name>zk_sessionTimeout</name>
+		<value>30000</value>
+	</property>
+	<property>
+		<name>zk_rootLock</name>
+		<value>/zklocks</value>
 	</property>
 
 </configuration>
