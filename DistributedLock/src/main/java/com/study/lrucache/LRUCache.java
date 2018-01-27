@@ -5,8 +5,6 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.SoftReference;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -80,7 +78,6 @@ public class LRUCache<K,V> {
             }
             cache.put(key,value);
         }
-        System.out.println("----add");
     }
 
 
@@ -112,21 +109,11 @@ public class LRUCache<K,V> {
         while(true){
             obj = referenceQueue.poll();
             if(obj != null){
-                LRUList newLruList;
                 synchronized (list) {
                         LOGGER.info(" GC Will remove " + ((KeyWord) obj).getValue());
                         cache.remove(((KeyWord) obj).getValue());
                         lruList.remove(((KeyWord) obj).getValue());
                         list.remove(obj);
-                        lruList.setCapacity(lruList.size() - 100);
-                        System.out.println("***************"+lruList.size());
-//                        int newCapacity = lruList.size();
-//                        newLruList = new LRUList(newCapacity);
-//                        for(K k : lruList.keySet()){
-//                            Pair<Integer,Long> pair = lruList.get(k);
-//                            newLruList.put(k,pair);
-//                        }
-
                 }
 
             }else{
@@ -166,26 +153,6 @@ public class LRUCache<K,V> {
                     LOGGER.warn("LRU will remove " + eldest.getKey());
                     cache.remove(eldest.getKey());
                     list.remove((int) eldest.getValue().getKey());
-                    int i = 0;
-                    for (K k : this.keySet()) {
-                        if (i >= size() - capacity) {
-                            break;
-                        } else {
-                            try {
-                                Method method = super.getClass().getMethod("afterNodeInsertion",boolean.class);
-                                method.invoke(super.getClass(),true);
-                            } catch (NoSuchMethodException e) {
-                                e.printStackTrace();
-                            } catch (InvocationTargetException e) {
-                                e.printStackTrace();
-                            } catch (IllegalAccessException e) {
-                                e.printStackTrace();
-                            }
-
-                        }
-                        i++;
-                    }
-                    System.gc();
                 }
                 return true;
             }
