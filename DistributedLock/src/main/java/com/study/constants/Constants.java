@@ -27,6 +27,8 @@ public class Constants {
     public static final Integer zk_sessionTimeout = conf.getInt("zk_sessionTimeout",30000);
     // zk rootLock
     public static final String zk_rootLock = conf.get("zk_rootLock");
+    // zk rootqueue
+    public static final String zk_rootQueue = conf.get("zk_rootQueue");
 
 
 }

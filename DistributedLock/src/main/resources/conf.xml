@@ -32,7 +32,12 @@
 	</property>
 	<property>
 		<name>zk_rootLock</name>
-		<value>/zklocks</value>
+		<value>/zkutils/zklocks</value>
 	</property>
+	<property>
+		<name>zk_rootQueue</name>
+		<value>/zkutils/zkqueues</value>
+	</property>
+
 
 </configuration>
