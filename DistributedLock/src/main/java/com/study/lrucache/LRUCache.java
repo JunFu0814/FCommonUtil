@@ -153,6 +153,7 @@ public class LRUCache<K,V> {
                     LOGGER.warn("LRU will remove " + eldest.getKey());
                     cache.remove(eldest.getKey());
                     list.remove((int) eldest.getValue().getKey());
+                    this.remove(eldest.getKey());
                 }
                 return true;
             }
