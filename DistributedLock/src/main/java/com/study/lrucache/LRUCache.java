@@ -61,8 +61,8 @@ public class LRUCache<K,V> {
         @Override
         protected void finalize() throws Throwable {
             try{
-               // lruList.remove(value);
-                //cache.remove(value);
+                lruList.remove(value);
+                cache.remove(value);
             }finally {
                 super.finalize();
                 LOGGER.info(value +" finalize called ");
@@ -130,7 +130,7 @@ public class LRUCache<K,V> {
                             lruList.setCapacity(128);
                         }else{
                             int num = lruList.size();
-                            lruList.setCapacity(num - num/10);
+                            lruList.setCapacity(num - num/8);
                             flag = false;
                         }
 

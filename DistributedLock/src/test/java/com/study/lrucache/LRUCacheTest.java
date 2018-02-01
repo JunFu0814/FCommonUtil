@@ -41,7 +41,7 @@ import java.util.concurrent.*;
  */
 public class LRUCacheTest {
 
-    static int size = 15000;
+    static int size = 16000;
     static ExecutorService pool = Executors.newFixedThreadPool(20);
 
 
