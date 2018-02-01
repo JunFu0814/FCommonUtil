@@ -1,26 +1,50 @@
 package com.study.lrucache;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.SoftReference;
 import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
-/**
- * Created by jc6a on 2018/1/25.
- */
 public class LRUCacheV1<K,V> {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(LRUCacheV1.class);
 
+
+    //存储KeyWord并记录index，之后会根据index删除
+    private List<KeyWord> list;
+    //数据存储介质，线程安全
     private ConcurrentHashMap<K,V> cache ;
-    private ReferenceQueue referenceQueue;
+    //保证LRU
     private LRUList lruList;
+    //cache中数据的ttl过期时间
+    private int ttl;
+    //ttl的单位
+    private TimeUnit timeUnit;
+    //SoftReference软引用的引用队列
+    private ReferenceQueue referenceQueue;
+
     public LRUCacheV1(int maxCapacity){
-        lruList = new LRUList(maxCapacity);
-        referenceQueue = new ReferenceQueue();
-        cache = new ConcurrentHashMap<>();
-        thread.start();
+        this(maxCapacity,7,TimeUnit.DAYS);
     }
+
+    public LRUCacheV1(int maxCapacity, int ttl, TimeUnit timeUnit){
+        cache = new ConcurrentHashMap<>();
+        lruList = new LRUList(maxCapacity);
+        list = new LinkedList<>();
+        referenceQueue = new ReferenceQueue();
+        thread.setDaemon(true);
+        thread.start();
+        this.ttl = ttl;
+        this.timeUnit = timeUnit;
+    }
+
     class KeyWord<K> extends SoftReference<K> {
         private K value;
         public KeyWord(K referent, ReferenceQueue<? super K> q,K value) {
@@ -33,15 +57,46 @@ public class LRUCacheV1<K,V> {
     }
 
     public void put(K key,V value){
-        synchronized (lruList){
-            lruList.put(new KeyWord(new byte[1],referenceQueue,key), (V) new byte[1]);
+        if(cache.containsKey(key)){
+            //cache中已经存在当前的key,只更新它的ttl时间
+            synchronized (list){
+                Pair<Integer,Long> pair = lruList.get(key);
+                int index = pair.getKey();
+                lruList.put(key,new Pair<>(index,System.currentTimeMillis()));
+            }
+            cache.put(key, value);
+        }else{
+            synchronized (list){
+                //referent byte[0]保证开销最小
+                list.add(new KeyWord(new byte[0],referenceQueue,key));
+                //index 作用记录KeyWord在list中位置，用于移除操作
+                int index = list.size()-1;
+                lruList.put(key,new Pair<>(index,System.currentTimeMillis()));
+            }
+            cache.put(key,value);
         }
-        cache.put(key,value);
-
     }
 
+
     public V get(K key){
-        return cache.get(key);
+        V value = cache.get(key);
+        if(value!=null){
+            Pair<Integer,Long> p =lruList.get(key);
+            if(p !=null){
+                long keyTime = p.getValue();
+                boolean isDelete = System.currentTimeMillis() - keyTime>timeUnit.toMinutes(ttl)?true:false;
+                if(isDelete){
+                    synchronized (list) {
+                        list.remove((int) lruList.get(key).getKey());
+                        lruList.remove(key);
+                        cache.remove(key);
+                    }
+                    LOGGER.warn("TTL will remove "+key);
+                    return null;
+                }
+            }
+        }
+        return value;
     }
 
 
@@ -51,12 +106,13 @@ public class LRUCacheV1<K,V> {
         while(true){
             obj = referenceQueue.poll();
             if(obj != null){
-                synchronized (lruList) {
-                    System.out.println("-------------------------------------------------------" + ((KeyWord) obj).getValue());
+                synchronized (list) {
+                    LOGGER.info(" GC Will remove " + ((KeyWord) obj).getValue());
                     cache.remove(((KeyWord) obj).getValue());
-                    //todo 这里会存在一些问题，lruList中key是以SoftReference的方式存放，remove操作并不能key去移除对应的value，弱键垃圾回收仅依赖恒等式（==）
-                    lruList.remove(obj);
+                    lruList.remove(((KeyWord) obj).getValue());
+                    list.remove(obj);
                 }
+
             }else{
                 try {
                     Thread.sleep(100);
@@ -67,10 +123,13 @@ public class LRUCacheV1<K,V> {
         }
     });
 
-    class LRUList extends LinkedHashMap<KeyWord,V>{
+    class LRUList extends LinkedHashMap<K,Pair<Integer,Long>>{
         private int capacity;
         public LRUList(int capacity){
             super(16, 0.75f, true);
+            this.capacity = capacity;
+        }
+        public void setCapacity(int capacity){
             this.capacity = capacity;
         }
         public LRUList(int initialCapacity, float loadFactor, boolean accessOrder,int capacity) {
@@ -79,15 +138,20 @@ public class LRUCacheV1<K,V> {
         }
 
         @Override
-        public V put(KeyWord key, V value) {
+        public Pair<Integer,Long>  put(K key, Pair<Integer,Long> value) {
             return super.put(key, value);
         }
 
         @Override
-        protected boolean removeEldestEntry(Map.Entry<KeyWord, V> eldest) {
-            if(size()>capacity){
-                System.out.println(eldest.getKey().getValue());
-                cache.remove(eldest.getKey().getValue());
+        protected boolean removeEldestEntry(Map.Entry<K, Pair<Integer,Long>> eldest) {
+            if (size() > capacity) {
+                System.out.println(size() + "------" + capacity);
+                synchronized (list) {
+                    LOGGER.warn("LRU will remove " + eldest.getKey());
+                    cache.remove(eldest.getKey());
+                    list.remove((int) eldest.getValue().getKey());
+                    this.remove(eldest.getKey());
+                }
                 return true;
             }
             return false;
@@ -97,24 +161,14 @@ public class LRUCacheV1<K,V> {
     public Map<K,V> getCache(){
         return cache;
     }
-    public void toString1(){
-        System.out.println(lruList.toString());
+
+    public LRUList getLruList(){
+        return lruList;
     }
 
-    public void test(){
-        LRUList lruList = new LRUList(20);
-        lruList.put(new KeyWord(new byte[1],referenceQueue,new byte[1]), (V) new byte[1]);
-        System.out.println(lruList.get(new KeyWord(new byte[1],referenceQueue,new byte[1])));
-
-
+    public List getList(){
+        return list;
     }
-    public static void main(String[] args) {
-        LRUCache lruCache = new LRUCache(150000);
-        for(int i=0;i<150000;i++){
-            lruCache.put(new String("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"+1),new String("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa123"));
-        }
-        System.out.println("end");
-        System.out.println(lruCache.getCache().size());
-    }
+
 
 }

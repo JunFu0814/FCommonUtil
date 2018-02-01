@@ -50,13 +50,13 @@ public class LRUCacheTest {
         LRUCache lruCache = new LRUCache(size,30000, TimeUnit.MILLISECONDS);
 
         //Cache<String,String> cache = CacheBuilder.newBuilder().weakKeys().maximumSize(size)
-        Cache<String,String> cache = CacheBuilder.newBuilder().maximumSize(size)
+        Cache<String,String> cache = CacheBuilder.newBuilder().weakKeys().maximumSize(size)
                 .expireAfterAccess(7, TimeUnit.DAYS)
                 .removalListener((RemovalListener<String, String>) removalNotification -> {
                     System.out.println("buildCache will remove : "+removalNotification.getKey());
                 }).build();
 
-       /* long start = System.currentTimeMillis();
+       long start = System.currentTimeMillis();
         List<Future<Boolean>> lrulist = new ArrayList(size);
         for(int i=0;i<size;i++){
             lrulist.add(pool.submit(new putTask(lruCache, "aaaaaaa" + i, "aaaaaa" + i)));
@@ -69,9 +69,9 @@ public class LRUCacheTest {
             }
         });
         long end = System.currentTimeMillis();
-        System.out.println("LRUCache size: " + lruCache.getCache().size() + ", LRUCache costtime: " + (end - start));*/
+        System.out.println("LRUCache size: " + lruCache.getCache().size() + ", LRUCache costtime: " + (end - start));
 
-        long start1 = System.currentTimeMillis();
+       /* long start1 = System.currentTimeMillis();
         List<Future<Boolean>> cachelist = new ArrayList(size);
         for(int i=0;i<size;i++){
             cachelist.add(pool.submit(new putTask1(cache, new String("aaaaaaa" + i), new String("aaaaaa") + i)));
@@ -85,7 +85,7 @@ public class LRUCacheTest {
         });
         long end1 = System.currentTimeMillis();
 
-        System.out.println("cacheBuilder size: " + cache.size() + ", cacheBuilder costtime: " + (end1 - start1));
+        System.out.println("cacheBuilder size: " + cache.size() + ", cacheBuilder costtime: " + (end1 - start1));*/
     }
 
 
@@ -183,11 +183,21 @@ public class LRUCacheTest {
         long end = System.currentTimeMillis();
 
         System.out.println(lruCache.getCache().size());
-        System.out.println(lruCache.getList().size());
-        System.out.println(lruCache.getList().size());
         System.out.println("LRUCache size: " + lruCache.getCache().size() + ", LRUCache costtime: " + (end - start));
 
 
+    }
+
+    @Test
+    public void test1() throws InterruptedException {
+        Cache<String,String> cache = CacheBuilder.newBuilder().weakKeys().maximumSize(size)
+                .expireAfterAccess(7, TimeUnit.DAYS)
+                .removalListener((RemovalListener<String, String>) removalNotification -> {
+                    System.out.println("buildCache will remove : "+removalNotification.getKey());
+                }).build();
+        cache.put("aa","aa");
+        cache.put("aa1","aa");
+        System.out.println(cache.size());
     }
 
 }
