@@ -60,13 +60,8 @@ public class LRUCache<K,V> {
          **/
         @Override
         protected void finalize() throws Throwable {
-            try{
-                lruList.remove(value);
-                cache.remove(value);
-            }finally {
-                super.finalize();
-                LOGGER.info(value +" finalize called ");
-            }
+            super.finalize();
+            LOGGER.info(value +" finalize called ");
         }
     }
 
