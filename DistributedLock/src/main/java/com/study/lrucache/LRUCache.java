@@ -57,6 +57,8 @@ public class LRUCache<K,V> {
          * 2.finalize方法在什么时候被调用?
          *  在垃圾回收的时候，某个对象要被回收的时候，会先进行一次标记，并且将该对象的finalize放到一个低优先级的线程中去执行,等到下一次垃圾回收的时候再把这个对象回收。
          *  jvm并不保证在垃圾回收之前能够执行他的finalize方法，甚至在执行finalize方法的线程发生了死循环，那其他的finalize方法都无法执行了。
+         *
+         *  所以当一个对象的finalize()被调用的时候，该对象只是被标记为不可达，并不会立刻回收，可能等到下次gc回收的时候会过很久。
          **/
         @Override
         protected void finalize() throws Throwable {
