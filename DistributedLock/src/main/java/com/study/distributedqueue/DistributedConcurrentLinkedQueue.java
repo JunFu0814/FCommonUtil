@@ -43,7 +43,7 @@ public class DistributedConcurrentLinkedQueue implements DLinkQueue {
             Stat stat = zk.exists(Constants.zk_rootQueue, null);
             if (stat == null){
                 //如果根节点不存在则创建
-                zk.create(Constants.zk_rootQueue, new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
+                zk.create(Constants.zk_rootQueue, new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
             }
         } catch (Exception e) {
             logger.error("Create Node Error", e);
@@ -58,13 +58,18 @@ public class DistributedConcurrentLinkedQueue implements DLinkQueue {
             throw new NullPointerException();
 
         try {
-            List<String> nodelist= zk.getChildren(Constants.zk_rootQueue, false);
-            if(nodelist.size() == capacity){
-                //队列满了入队失败，返回false
-                logger.warn("Queue Is Full");
-                return false;
+            Stat stat = zk.exists(Constants.zk_rootQueue + "/" + queueName, null);
+            if (stat == null){
+                zk.create(Constants.zk_rootQueue+ "/" + queueName, new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+            }else{
+                List<String> nodelist= zk.getChildren(Constants.zk_rootQueue+ "/" + queueName, false);
+                if(nodelist.size() == capacity){
+                    //队列满了入队失败，返回false
+                    logger.warn("Queue Is Full");
+                    return false;
+                }
             }
-            zk.create(Constants.zk_rootQueue + "/" + queueName, e, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
+            zk.create(Constants.zk_rootQueue + "/" + queueName + "/" + queueName, e, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
         } catch (Exception e1) {
             logger.error("Create Node Error", e1);
         }
@@ -86,7 +91,7 @@ public class DistributedConcurrentLinkedQueue implements DLinkQueue {
                 return new byte[0];
             }
             //获取头节点（最先入队的），对nodelist排序获取最小的
-            String headnode = Constants.zk_rootQueue + "/" + firstchild;
+            String headnode = Constants.zk_rootQueue + "/"  + queueName +  "/" + firstchild;
             try {
                 data = zk.getData(headnode, false, null);
                 zk.delete(headnode, -1);
@@ -106,7 +111,7 @@ public class DistributedConcurrentLinkedQueue implements DLinkQueue {
         //遍历节点检查value
         List<String> nodes = null;
         try {
-            nodes = zk.getChildren(Constants.zk_rootQueue,false);
+            nodes = zk.getChildren(Constants.zk_rootQueue + "/" + queueName,false);
 
             if( nodes.size() == 0 ){
                 logger.warn("Queue Is Empty");
@@ -114,7 +119,7 @@ public class DistributedConcurrentLinkedQueue implements DLinkQueue {
             }
 
             for(String node : nodes){
-                byte[] data = zk.getData(Constants.zk_rootQueue + "/" + node, false, null);
+                byte[] data = zk.getData(Constants.zk_rootQueue + "/" + queueName + "/" + node, false, null);
                 if (Bytes.compareTo(e,data) == 0){
                     return true;
                 }
@@ -130,7 +135,7 @@ public class DistributedConcurrentLinkedQueue implements DLinkQueue {
 
         List<String> nodes = null;
         try {
-            nodes = zk.getChildren(Constants.zk_rootQueue,false);
+            nodes = zk.getChildren(Constants.zk_rootQueue+ "/" + queueName,false);
         } catch (Exception e) {
             logger.error("Get Child Node Error", e);
         }
@@ -142,10 +147,11 @@ public class DistributedConcurrentLinkedQueue implements DLinkQueue {
     public boolean clear() {
         List<String> nodes = null;
         try {
-            nodes = zk.getChildren(Constants.zk_rootQueue,false);
+            nodes = zk.getChildren(Constants.zk_rootQueue+ "/" + queueName,false);
             for(String node : nodes){
-                zk.delete(Constants.zk_rootQueue + "/" + node, -1);
+                zk.delete(Constants.zk_rootQueue + "/" + queueName + "/" + node, -1);
             }
+            zk.delete(Constants.zk_rootQueue + "/" + queueName , -1);
         } catch (Exception e) {
             logger.error("Clear Nodes Error", e);
             return false;
@@ -155,7 +161,7 @@ public class DistributedConcurrentLinkedQueue implements DLinkQueue {
 
     private String FirstChild(){
         try{
-            List<String> children =zk.getChildren(Constants.zk_rootQueue,false);
+            List<String> children =zk.getChildren(Constants.zk_rootQueue + "/" + queueName,false);
             Collections.sort(children,
                     new Comparator<String>() {
                         public int compare(String lhs, String rhs) {
