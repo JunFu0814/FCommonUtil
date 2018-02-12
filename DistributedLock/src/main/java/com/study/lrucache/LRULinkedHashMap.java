@@ -40,7 +40,6 @@ public class LRULinkedHashMap<K,V>  extends LinkedHashMap<K,V> {
 
         //System.out.println(eldest.getKey() + "=" + eldest.getValue());
 
-        //todo 后续这边还会加入ttl过期策略
         if(size() > capacity) {
             return true;
         }

@@ -1,10 +1,15 @@
 package com.study.distributedlock.redis;
 
-import com.study.distributedlock.manager.RedisManager;
 import com.study.distributedlock.redis.impl.RedisDistributedLock;
 import org.junit.Test;
-import redis.clients.jedis.JedisCluster;
+import redis.clients.jedis.Jedis;
 
+import java.io.BufferedOutputStream;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -65,11 +70,76 @@ public class DLockTest {
         }
     }
 
-
     @Test
     public void testdel() throws InterruptedException {
-        JedisCluster conn = RedisManager.getConnection();
-        System.out.println(conn.set("leoA","555"));
-        System.out.println(conn.del("leoA1"));
+        Jedis jedis1 = new Jedis("10.16.46.192",8018);
+        System.out.println(jedis1.del("leoA"));
     }
+
+    @Test
+    public void testinsert() throws InterruptedException {
+        Jedis jedis = new Jedis("10.16.46.172",8010);
+        System.out.println(jedis.set("leoA", "666"));
+    }
+
+    @Test
+    public void testmigrate(){
+        Jedis jedis = new Jedis("10.16.46.172",8010);
+        Jedis jedis1 = new Jedis("10.16.46.192",8018);
+        System.out.println(jedis.migrate("10.16.46.192", 8018, "leoA", 0, 1000));
+        System.out.println(jedis.get("leoA"));
+        System.out.println(jedis1.get("leoA"));
+    }
+
+    /**
+     * 使用tcp连接到redis发送命令读取数据（BIO）
+     */
+    @Test
+    public void testSocketConnectRedis(){
+        //String command = "*2\r\n$3\r\nget\r\n$5\r\nhello\r\n";
+        //String command = "*1\r\n$6\r\ndbsize\r\n";
+        //String command = "*1\r\n$4\r\ninfo\r\n";
+        //pipeline
+        String command = "*2\r\n$3\r\nget\r\n$5\r\nhello\r\n*1\r\n$6\r\ndbsize\r\n";
+
+        BufferedOutputStream out = null;
+        BufferedReader bufferedReader = null;
+        Socket socket = new Socket();
+        try {
+
+            socket.setReuseAddress(true);
+            socket.setKeepAlive(true); // Will monitor the TCP connection is
+            socket.setTcpNoDelay(true); // Socket buffer Whetherclosed, to
+            socket.setSoLinger(true, 0); // Control calls close () method,
+            socket.connect(new InetSocketAddress("10.16.46.172", 8009), 3000);
+            socket.setSoTimeout(30000);
+            // 向客户端回复信息
+            out = new BufferedOutputStream(socket.getOutputStream());
+            out.write(command.getBytes());
+            out.flush();
+
+            InputStreamReader read = new InputStreamReader(socket.getInputStream());
+            bufferedReader = new BufferedReader(read,10000);
+
+            String line = null;
+            while ((line = bufferedReader.readLine()) != null){
+                System.out.println(line);
+            }
+
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                out.close();
+                bufferedReader.close();
+                socket.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+
+        }
+
+    }
+
 }
