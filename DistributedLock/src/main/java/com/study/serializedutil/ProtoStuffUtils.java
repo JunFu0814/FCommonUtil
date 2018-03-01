@@ -17,11 +17,17 @@ import java.io.IOException;
  */
 public class ProtoStuffUtils{
     private static Objenesis objenesis = new ObjenesisStd(true);
+
     private static <T> Schema<T> getSchema(Class<T> cls)
     {
-        Schema<T> schema = RuntimeSchema.createFrom(cls);
+        /**
+         * 2018/2/28 fix bug : RuntimeSchema.createFrom(cls) --> RuntimeSchema.getSchema(cls)
+         * 之前的代码会每次调用序列化的方法的时候都load一次class，会导致常量池不断地增大。
+         */
+        Schema<T> schema = RuntimeSchema.getSchema(cls);
         return schema;
     }
+
     public static <T> byte[] serialize(T obj)
     {
         Class<T> cls = (Class<T>) obj.getClass();
