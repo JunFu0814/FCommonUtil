@@ -26,8 +26,8 @@
       </profile>
     </annotationProcessing>
     <bytecodeTargetLevel target="1.8">
-      <module name="DistributedLock" target="1.8" />
-      <module name="FCommonUtils" target="1.8" />
+      <module name="DistributedLock" target="1.5" />
+      <module name="FCommonUtils" target="1.5" />
     </bytecodeTargetLevel>
   </component>
 </project>
