@@ -12,7 +12,7 @@
     <packaging>pom</packaging>
 
     <modules>
-        <module>DistributedLock</module>
+        <module>CommonTools</module>
     </modules>
 
 
