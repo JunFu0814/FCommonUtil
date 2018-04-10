@@ -22,12 +22,12 @@
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
         <outputRelativeToContentRoot value="true" />
         <processorPath useClasspath="true" />
-        <module name="DistributedLock" />
+        <module name="CommonTools" />
       </profile>
     </annotationProcessing>
     <bytecodeTargetLevel target="1.8">
-      <module name="DistributedLock" target="1.5" />
-      <module name="FCommonUtils" target="1.5" />
+      <module name="CommonTools" target="1.8" />
+      <module name="FCommonUtils" target="1.8" />
     </bytecodeTargetLevel>
   </component>
 </project>
