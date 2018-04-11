@@ -75,6 +75,13 @@
             <version>19.0</version>
         </dependency>
 
+        <!--kafka low api-->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka_2.11</artifactId>
+            <version>0.8.2.0</version>
+        </dependency>
+
     </dependencies>
 
 </project>
