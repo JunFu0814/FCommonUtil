@@ -1,18 +1,16 @@
 package com.study.kafka.handler;
 
-import kafka.message.MessageAndOffset;
-
 /**
  * Created by lf52 on 2018/4/11.
  */
-public interface KafkaMsgHandler {
+public interface KafkaMsgHandler<T> {
 
     /**
      * read message handler
-     * @param messageAndOffset
+     * @param t
      * @return
      * @throws Exception
      */
-     void callback(MessageAndOffset messageAndOffset) throws Exception;
+    Boolean callback(T t) throws Exception;
 
 }

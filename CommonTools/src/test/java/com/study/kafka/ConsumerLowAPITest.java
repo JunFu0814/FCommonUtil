@@ -26,12 +26,15 @@ public class ConsumerLowAPITest {
         long maxReads = 100000;
         kafka.consume(maxReads, topic ,partition, brokers, port, new KafkaMsgHandler() {
             @Override
-            public void callback(MessageAndOffset messageAndOffset) throws Exception {
-                ByteBuffer payload = messageAndOffset.message().payload();
+            public Boolean callback(Object object) throws Exception {
+                MessageAndOffset messageAndOffset = (MessageAndOffset)object;
+                ByteBuffer payload =messageAndOffset.message().payload();
                 byte[] bytes = new byte[payload.limit()];
                 payload.get(bytes);
                 System.out.println(String.valueOf("now offset is : " + messageAndOffset.offset()) + "   &&   value is : " + new String(bytes, "UTF-8"));
+                return true;
             }
+
         });
     }
 
