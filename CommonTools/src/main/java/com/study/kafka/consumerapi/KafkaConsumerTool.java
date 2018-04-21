@@ -27,41 +27,34 @@ public class KafkaConsumerTool {
     }
 
     public KafkaConsumerTool(List<String> subscribe,Properties props){
-           this.subscribe = subscribe;
-           this.props = props;
+        this.subscribe = subscribe;
+        this.props = props;
     }
 
     /**
-     * batch consume
-     * @param kafkaMsgHandler
-     * @param minBatchSize batch commit size
-     * @throws Exception
-     */
-    public void consume(final KafkaMsgHandler kafkaMsgHandler,int minBatchSize) throws Exception {
-
-        KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer(props);
-        consumer.subscribe(subscribe);
-
-        List<ConsumerRecord<byte[], byte[]>> buffer = new ArrayList<>();
-        while (true) {
-            ConsumerRecords<byte[], byte[]> records = consumer.poll(100);
-            for (ConsumerRecord<byte[], byte[]> record : records){
-                 buffer.add(record);
-            }
-            if (buffer.size() >= minBatchSize) {
-                kafkaMsgHandler.callback(buffer);
-                consumer.commitSync();
-                buffer.clear();
-            }
-        }
-    }
-
-    /**
-     * batch consume : offset control
+     * 自动控制offset
      * @param kafkaMsgHandler
      * @throws Exception
      */
     public void consume(final KafkaMsgHandler kafkaMsgHandler) throws Exception {
+
+        KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer(props);
+        consumer.subscribe(subscribe);
+
+        while (true) {
+            ConsumerRecords<byte[], byte[]> records = consumer.poll(100);
+            for (ConsumerRecord<byte[], byte[]> record : records)
+                kafkaMsgHandler.callback(record);
+        }
+
+    }
+
+    /**
+     * 手动控制offset消费
+     * @param kafkaMsgHandler
+     * @throws Exception
+     */
+    public void consumeOffsetControl(final KafkaMsgHandler kafkaMsgHandler) throws Exception {
 
         KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer(props);
         consumer.subscribe(subscribe);
@@ -123,6 +116,37 @@ public class KafkaConsumerTool {
     public void consume(final KafkaMsgHandler kafkaMsgHandler,String topic,int partition,int minBatchSize) throws Exception {
         consume(kafkaMsgHandler, topic, (Integer[]) Arrays.asList(partition).toArray(), minBatchSize);
     }
+
+    /**
+     * 从指定offset开始消费
+     * @param kafkaMsgHandler
+     * @param topic
+     * @param partition
+     * @param minBatchSize
+     * @param offset
+     * @throws Exception
+     */
+    public void  consume(final KafkaMsgHandler kafkaMsgHandler,String topic,Integer partition,int minBatchSize,long offset) throws Exception {
+
+        KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer(props);
+        TopicPartition topicPartition = new TopicPartition(topic, partition);
+        consumer.assign(Arrays.asList(topicPartition));
+        consumer.seek(topicPartition, offset);
+        List<ConsumerRecord<byte[], byte[]>> buffer = new ArrayList<>();
+        while (true) {
+            ConsumerRecords<byte[], byte[]> records = consumer.poll(100);
+            for (ConsumerRecord<byte[], byte[]> record : records){
+                buffer.add(record);
+            }
+            if (buffer.size() >= minBatchSize) {
+                kafkaMsgHandler.callback(buffer);
+                consumer.commitSync();
+                buffer.clear();
+            }
+        }
+
+    }
+
 
 
 

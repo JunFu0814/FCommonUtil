@@ -11,7 +11,10 @@ import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
-import java.util.concurrent.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * Created by lf52 on 2018/4/13.
@@ -32,19 +35,16 @@ public class ConsumerTest {
         tool.consume(new KafkaMsgHandler() {
             @Override
             public Boolean callback(Object object) throws Exception {
-                List<ConsumerRecord<byte[], byte[]>> recordlist = (List<ConsumerRecord<byte[], byte[]>>)object;
-                System.out.println("record size : " + recordlist.size());
-                recordlist.forEach(record -> {
-                    try {
-                        System.out.printf("offset = %d, key = %s, value = %s , partition = %s%n", record.offset(), new String(record.key(), "UTF-8"), new String(record.value(), "UTF-8"), record.partition());
-                    } catch (UnsupportedEncodingException e) {
-                        LOGGER.error(e.getMessage());
-                    }
-                });
+                ConsumerRecord<byte[], byte[]> record = (ConsumerRecord<byte[], byte[]>)object;
+                try {
+                    System.out.printf("offset = %d, key = %s, value = %s , partition = %s%n", record.offset(), new String(record.key(), "UTF-8"), new String(record.value(), "UTF-8"), record.partition());
+                } catch (UnsupportedEncodingException e) {
+                    LOGGER.error(e.getMessage());
+                }
 
                 return true;
             }
-        },5);
+        });
 
     }
 
@@ -114,31 +114,31 @@ public class ConsumerTest {
         for (int i = 0 ; i < 4 ; i ++){
             int parition = i;
             Future<Boolean> future = pool.submit(new Callable<Boolean>() {
-               @Override
-               public Boolean call() throws Exception {
-                   KafkaConsumerTool tool = new KafkaConsumerTool("kafka10test",porp);
-                   tool.consume(new KafkaMsgHandler() {
-                       @Override
-                       public Boolean callback(Object object) throws Exception {
+                @Override
+                public Boolean call() throws Exception {
+                    KafkaConsumerTool tool = new KafkaConsumerTool("kafka10test",porp);
+                    tool.consume(new KafkaMsgHandler() {
+                        @Override
+                        public Boolean callback(Object object) throws Exception {
 
 
-                           List<ConsumerRecord<byte[], byte[]>> partitionRecords = (List<ConsumerRecord<byte[], byte[]>>)object;
-                           for (ConsumerRecord<byte[], byte[]> record : partitionRecords) {
-                               try {
-                                   System.out.printf(Thread.currentThread().getName() + " --> offset = %d, key = %s, value = %s , partition = %s%n", record.offset(), new String(record.key(), "UTF-8"), new String(record.value(), "UTF-8"), record.partition());
-                               } catch (UnsupportedEncodingException e) {
-                                   e.printStackTrace();
-                                   LOGGER.error(e.getMessage());
-                               }
-                           }
-                           return true;
-                       }
-                   },topic,parition,1);
-                   return true;
-               }
-           });
+                            List<ConsumerRecord<byte[], byte[]>> partitionRecords = (List<ConsumerRecord<byte[], byte[]>>)object;
+                            for (ConsumerRecord<byte[], byte[]> record : partitionRecords) {
+                                try {
+                                    System.out.printf(Thread.currentThread().getName() + " --> offset = %d, key = %s, value = %s , partition = %s%n", record.offset(), new String(record.key(), "UTF-8"), new String(record.value(), "UTF-8"), record.partition());
+                                } catch (UnsupportedEncodingException e) {
+                                    e.printStackTrace();
+                                    LOGGER.error(e.getMessage());
+                                }
+                            }
+                            return true;
+                        }
+                    },topic,parition,1);
+                    return true;
+                }
+            });
             list.add(future);
-       }
+        }
         list.forEach(future -> {
             try {
                 future.get();
@@ -148,12 +148,68 @@ public class ConsumerTest {
         });
     }
 
+    /**
+     * 手动控制offset消费
+     * @throws Exception
+     */
+    @Test
+    public void test4() throws Exception {
+        Properties porp = initConfig("ssecbigdata03:9092");
+        KafkaConsumerTool tool = new KafkaConsumerTool("kafka10test",porp);
+        tool.consumeOffsetControl(new KafkaMsgHandler() {
+            @Override
+            public Boolean callback(Object object) throws Exception {
+
+
+                List<ConsumerRecord<byte[], byte[]>> partitionRecords = (List<ConsumerRecord<byte[], byte[]>>) object;
+                for (ConsumerRecord<byte[], byte[]> record : partitionRecords) {
+                    try {
+                        System.out.printf("offset = %d, key = %s, value = %s , partition = %s%n", record.offset(), new String(record.key(), "UTF-8"), new String(record.value(), "UTF-8"), record.partition());
+                    } catch (UnsupportedEncodingException e) {
+                        LOGGER.error(e.getMessage());
+                    }
+                }
+                return true;
+            }
+        });
+
+    }
+
+    /**
+     * 从中的指定的offset开始消费
+     * @throws Exception
+     */
+    @Test
+    public void test5() throws Exception {
+        Properties porp = initConfig("ssecbigdata03:9092");
+        KafkaConsumerTool tool = new KafkaConsumerTool("kafka10test",porp);
+        tool.consume(new KafkaMsgHandler() {
+            @Override
+            public Boolean callback(Object object) throws Exception {
+
+
+                List<ConsumerRecord<byte[], byte[]>> partitionRecords = (List<ConsumerRecord<byte[], byte[]>>) object;
+                for (ConsumerRecord<byte[], byte[]> record : partitionRecords) {
+                    try {
+                        System.out.printf("offset = %d, key = %s, value = %s , partition = %s%n", record.offset(), new String(record.key(), "UTF-8"), new String(record.value(), "UTF-8"), record.partition());
+                    } catch (UnsupportedEncodingException e) {
+                        LOGGER.error(e.getMessage());
+                    }
+                }
+                return true;
+            }
+        }, "kafka10test", 1, 1, 80);
+
+    }
 
     private Properties initConfig(String brokers){
         Properties props = new Properties();
         props.put("bootstrap.servers", brokers);
         //手动提交offset
         props.put("enable.auto.commit", "false");
+        //自动确认offset的时间间隔
+        props.put("auto.commit.interval.ms", "1000");
+
         props.put("session.timeout.ms", "30000");
         props.put("max.poll.records", 100); //每次poll最多获取100条数据
         props.put("group.id", "0");

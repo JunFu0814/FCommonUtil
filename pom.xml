@@ -13,6 +13,7 @@
 
     <modules>
         <module>CommonTools</module>
+        <module>SpringKafka</module>
     </modules>
 
 

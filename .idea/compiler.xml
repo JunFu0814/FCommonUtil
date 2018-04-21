@@ -23,11 +23,13 @@
         <outputRelativeToContentRoot value="true" />
         <processorPath useClasspath="true" />
         <module name="CommonTools" />
+        <module name="SpringKafka" />
       </profile>
     </annotationProcessing>
     <bytecodeTargetLevel target="1.8">
       <module name="CommonTools" target="1.8" />
       <module name="FCommonUtils" target="1.8" />
+      <module name="SpringKafka" target="1.8" />
     </bytecodeTargetLevel>
   </component>
 </project>
