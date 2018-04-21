@@ -23,7 +23,6 @@
         <outputRelativeToContentRoot value="true" />
         <processorPath useClasspath="true" />
         <module name="CommonTools" />
-        <module name="SpringKafka" />
       </profile>
     </annotationProcessing>
     <bytecodeTargetLevel target="1.8">
