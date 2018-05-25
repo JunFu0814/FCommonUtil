@@ -3,6 +3,7 @@ package com.study.lrucache;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.RemovalListener;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -41,11 +42,14 @@ import java.util.concurrent.*;
  */
 public class LRUCacheTest {
 
-    static int size = 16000;
-    static ExecutorService pool = Executors.newFixedThreadPool(20);
+    static int size = 30000;
+    static ExecutorService pool =  new ThreadPoolExecutor(50, 100, 60, TimeUnit.SECONDS,
+                                       new ArrayBlockingQueue<>(50 * 4, true),
+                                       new ThreadFactoryBuilder().setNameFormat("LRU TEST POOL").build(),
+                                       new ThreadPoolExecutor.AbortPolicy());
 
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws InterruptedException {
 
         LRUCache lruCache = new LRUCache(size,30000, TimeUnit.MILLISECONDS);
 
@@ -56,10 +60,11 @@ public class LRUCacheTest {
                     System.out.println("buildCache will remove : "+removalNotification.getKey());
                 }).build();
 
-       long start = System.currentTimeMillis();
+        /*long start = System.currentTimeMillis();
         List<Future<Boolean>> lrulist = new ArrayList(size);
         for(int i=0;i<size;i++){
             lrulist.add(pool.submit(new putTask(lruCache, "aaaaaaa" + i, "aaaaaa" + i)));
+            Thread.sleep(0, 100);
         }
         lrulist.forEach(item -> {
             try {
@@ -69,12 +74,13 @@ public class LRUCacheTest {
             }
         });
         long end = System.currentTimeMillis();
-        System.out.println("LRUCache size: " + lruCache.getCache().size() + ", LRUCache costtime: " + (end - start));
+        System.out.println("LRUCache size: " + lruCache.getCache().size() + ", LRUCache costtime: " + (end - start));*/
 
-       /* long start1 = System.currentTimeMillis();
+        long start1 = System.currentTimeMillis();
         List<Future<Boolean>> cachelist = new ArrayList(size);
         for(int i=0;i<size;i++){
             cachelist.add(pool.submit(new putTask1(cache, new String("aaaaaaa" + i), new String("aaaaaa") + i)));
+            Thread.sleep(0,50);
         }
         cachelist.forEach(item -> {
             try {
@@ -85,7 +91,8 @@ public class LRUCacheTest {
         });
         long end1 = System.currentTimeMillis();
 
-        System.out.println("cacheBuilder size: " + cache.size() + ", cacheBuilder costtime: " + (end1 - start1));*/
+        System.out.println("cacheBuilder size: " + cache.size() + ", cacheBuilder costtime: " + (end1 - start1));
+
     }
 
 
@@ -131,7 +138,7 @@ public class LRUCacheTest {
     @Test
     public void testForeach() throws InterruptedException {
 
-        LRUCache lruCache = new LRUCache(10000,30000, TimeUnit.MILLISECONDS);
+        LRUCache lruCache = new LRUCache(20000,30000, TimeUnit.MILLISECONDS);
 
         Cache<String,String> cache = CacheBuilder.newBuilder().maximumSize(10000000)
                 .expireAfterAccess(7, TimeUnit.DAYS)
@@ -140,7 +147,7 @@ public class LRUCacheTest {
                 }).build();
 
 
-        for(int i=0;i<10000;i++){
+        for(int i=0;i<20000;i++){
             lruCache.put(new String("aaaaaaa" + i), new String("aaaaaa") + i);
             cache.put(new String("aaaaaaa" + i), new String("aaaaaa") + i);
         }
@@ -159,7 +166,7 @@ public class LRUCacheTest {
         long end1 = System.currentTimeMillis();
 
         System.out.println("LRUCache size: " + lruCache.getCache().size() + ", LRUCache costtime: " + (end - start));
-        System.out.println("cacheBuilder size: " + cache.size() + ", cacheBuilder costtime: " + (end1 - start1));
+        System.out.println("cacheBuilder size: " + cache.size() + ", cacheBuilder costtime: " + (end1 - start1) + " ,value");
 
 
     }
@@ -189,15 +196,20 @@ public class LRUCacheTest {
     }
 
     @Test
-    public void test1() throws InterruptedException {
-        Cache<String,String> cache = CacheBuilder.newBuilder().weakKeys().maximumSize(size)
+    public void test1() throws InterruptedException, ExecutionException {
+        Cache<String,String> cache = CacheBuilder.newBuilder().weakKeys().weakValues().maximumSize(size)
                 .expireAfterAccess(7, TimeUnit.DAYS)
                 .removalListener((RemovalListener<String, String>) removalNotification -> {
-                    System.out.println("buildCache will remove : "+removalNotification.getKey());
+                    System.out.println("buildCache will remove : " + removalNotification.getKey());
                 }).build();
-        cache.put("aa","aa");
-        cache.put("aa1","aa");
-        System.out.println(cache.size());
+        cache.put(new String("aa1"), "aa1");
+        String v = cache.get(new String("aa1"), new Callable<String>() {
+            @Override
+            public String call() throws Exception {
+                return null;
+            }
+        });
+        System.out.println(v);
     }
 
 }
