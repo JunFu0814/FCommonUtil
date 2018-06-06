@@ -16,11 +16,11 @@ import java.util.List;
 /**
  * Created by lf52 on 2018/1/25.
  *
- * 基于zk实现一个简单的分布式并发队列，适用于秒杀等场景。
+ * 基于zk实现一个简单的同步的分步式队，使用场景如：当一个队列的成员都聚齐时，这个队列才可用，否则一直等待所有成员到达。
  */
-public class DistributedConcurrentLinkedQueue implements DLinkQueue {
+public class DistributedLinkedQueue implements DLinkQueue {
 
-    private static final Logger logger = Logger.getLogger(DistributedConcurrentLinkedQueue.class);
+    private static final Logger logger = Logger.getLogger(DistributedLinkedQueue.class);
 
     private static final int MAX_CAPACITY = 2000;
 
@@ -29,7 +29,7 @@ public class DistributedConcurrentLinkedQueue implements DLinkQueue {
     private String queueName;
 
 
-    public DistributedConcurrentLinkedQueue(ZooKeeper zk, String queueName, Integer capacity){
+    public DistributedLinkedQueue(ZooKeeper zk, String queueName, Integer capacity){
 
          //考虑到zk上创建过多的node会影响其性能，限制queue的大小最大为2000
          if (capacity > MAX_CAPACITY){
@@ -40,10 +40,10 @@ public class DistributedConcurrentLinkedQueue implements DLinkQueue {
          this.capacity = capacity;
 
         try {
-            Stat stat = zk.exists(Constants.zk_rootQueue, null);
+            Stat stat = zk.exists(Constants.zk_rootQueue+ "/" +queueName, null);
             if (stat == null){
                 //如果根节点不存在则创建
-                zk.create(Constants.zk_rootQueue, new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+                zk.create(Constants.zk_rootQueue + "/" + queueName, new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
             }
         } catch (Exception e) {
             logger.error("Create Node Error", e);
@@ -79,28 +79,23 @@ public class DistributedConcurrentLinkedQueue implements DLinkQueue {
 
     @Override
     public byte[] poll() {
-        String firstchild = null;
         byte[] data = new byte[0];
-
-        //保证线程安全，poll操作需要加锁
-        synchronized(DistributedConcurrentLinkedQueue.class) {
-            firstchild = FirstChild();
-            if(firstchild == null){
-                //队列满了入队失败，返回false
-                logger.warn("Queue Is Empty");
-                return new byte[0];
-            }
-            //获取头节点（最先入队的），对nodelist排序获取最小的
-            String headnode = Constants.zk_rootQueue + "/"  + queueName +  "/" + firstchild;
-            try {
-                data = zk.getData(headnode, false, null);
-                zk.delete(headnode, -1);
-
-            } catch (Exception e) {
-                logger.error("Queue Poll Error",e);
-            }
-
+        String firstchild = FirstChild();
+        if(firstchild == null){
+            //队列空了出队失败，返回false
+            logger.warn("Queue Is Empty");
+            return data;
         }
+        //获取头节点（最先入队的），对nodelist排序获取最小的
+        String headnode = Constants.zk_rootQueue + "/"  + queueName +  "/" + firstchild;
+        try {
+            data = zk.getData(headnode, false, null);
+            zk.delete(headnode, -1);
+
+        } catch (Exception e) {
+            logger.error("Queue Poll Error",e);
+        }
+
 
         return data;
     }

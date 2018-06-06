@@ -7,7 +7,7 @@ import org.apache.zookeeper.ZooKeeper;
 import org.junit.Test;
 
 import java.io.IOException;
-import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.*;
 
@@ -27,7 +27,7 @@ public class DetributeQueueTest {
                 public void process(WatchedEvent event) {
                 }
             });
-            DistributedConcurrentLinkedQueue queue = new DistributedConcurrentLinkedQueue(zk,"leotest",100);
+            DistributedLinkedQueue queue = new DistributedLinkedQueue(zk,"leotest",100);
             for(int i = 0;i < 100 ; i++){
                 String data = "test"+ i;
                 queue.offer(data.getBytes());
@@ -48,7 +48,7 @@ public class DetributeQueueTest {
                 public void process(WatchedEvent event) {
                 }
             });
-            DistributedConcurrentLinkedQueue queue = new DistributedConcurrentLinkedQueue(zk,"leotest",20);
+            DistributedLinkedQueue queue = new DistributedLinkedQueue(zk,"leotest",20);
             System.out.println(new String(queue.poll()));
         } catch (IOException e) {
             e.printStackTrace();
@@ -66,7 +66,7 @@ public class DetributeQueueTest {
                 public void process(WatchedEvent event) {
                 }
             });
-            DistributedConcurrentLinkedQueue queue = new DistributedConcurrentLinkedQueue(zk,"leotest",20);
+            DistributedLinkedQueue queue = new DistributedLinkedQueue(zk,"leotest",20);
             System.out.println(queue.size());
         } catch (IOException e) {
             e.printStackTrace();
@@ -80,7 +80,7 @@ public class DetributeQueueTest {
             public void process(WatchedEvent event) {
             }
         });
-        DistributedConcurrentLinkedQueue queue = new DistributedConcurrentLinkedQueue(zk,"leotest",20);
+        DistributedLinkedQueue queue = new DistributedLinkedQueue(zk,"leotest",20);
         System.out.println(queue.clear());
     }
 
@@ -91,7 +91,7 @@ public class DetributeQueueTest {
             public void process(WatchedEvent event) {
             }
         });
-        DistributedConcurrentLinkedQueue queue = new DistributedConcurrentLinkedQueue(zk,"leotest",20);
+        DistributedLinkedQueue queue = new DistributedLinkedQueue(zk,"leotest",20);
         System.out.println(queue.contains("test1".getBytes()));
     }
 
@@ -129,38 +129,40 @@ public class DetributeQueueTest {
             }
         });
         int size = 50;
-        DistributedConcurrentLinkedQueue queue = new DistributedConcurrentLinkedQueue(zk,"leotest",100);
-
-
-        Callable task = new Callable<String>() {
-            @Override
-            public String call() throws Exception {
-                try {
-                    System.out.println(new String(queue.poll()));
-                    //System.out.println(Thread.currentThread().getName() + " is running");
-                    Thread.sleep(1000);
-                } catch(Exception e) {
-                    e.printStackTrace();
-                }
-                return null;
+        DistributedLinkedQueue queue = new DistributedLinkedQueue(zk,"leotest",100);
+        List<Future<Boolean>> list = new LinkedList<>();
+        for(int i = 0;i < size ; i++){
+            list.add(pool.submit(putTask(queue, "leotest" + i)));
+        }
+        list.forEach(future ->{
+            try {
+                future.get();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            } catch (ExecutionException e) {
+                e.printStackTrace();
             }
-
-        };
-
-        List<Future<String>> list = new ArrayList();
-        for(int i = 0;i < size ; i++){
-            list.add(pool.submit(task));
+        });
+        //³ö¶ÓÁÐ
+         if(queue.size() >=  50 ){
+              for(int i = 0;i < queue.size() ; i++){
+                  System.out.println(new String(queue.poll()));
+              }
         }
 
-        for(int i = 0;i < size ; i++){
-            list.get(i).get();
-        }
-
-        Thread.sleep(10 * 1000);
-
+        System.out.println("end");
     }
 
+    private Callable<Boolean> putTask(DistributedLinkedQueue queue,String data) {
+        return new Callable<Boolean>() {
+            @Override
+            public Boolean call() {
+                queue.offer(data.getBytes());
+                return true;
+            }
+        };
 
+    };
 
 
 }
