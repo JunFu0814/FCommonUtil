@@ -1,0 +1,257 @@
+1.Storm简介：
+        Apache Storm是一款免费开源的分布式，高容错的实时计算系统。
+      
+2.Storm的特点：
+	编程简单：    开发人员只需要关注应用逻辑，而且跟Hadoop类似，Storm提供的编程原语也很简单，对数据的实时计算提供了简单Spout和Bolt原语。。          
+	高性能低延迟：可以应用于广告搜索引擎这种要求对广告主的操作进行实时响应的场景。
+	分布式：      可以轻松应对数据量大，单机搞不定的场景。
+	可扩展：      随着业务发展，数据量和计算量越来越大，系统可水平扩展。
+	容错：        单个节点挂了不影响应用。Nimbus和Supervisor之间的所有协调工作都是通过一个Zookeeper集群来完成。并且nimbus进程和supervisor都是快速失败（fail-fast)和无状态的，
+	              所有的状态要么在Zookeeper里面，要么在本地磁盘上。当一个节点挂了然后再重启它们，它们可以继续工作，就好像什么都没有发生过似的。这个设计使得storm不可思议的稳定。      
+	高可靠性：    Storm可以保证Spout发出的每条消息都能被完全处理，Spout发出的消息后续可能会触发产生成千上万条消息，可以形象的理解为一棵消息树，只有当这颗消息树中的所有消息都被处理了才叫“完全处理”，
+	              这样就可以保证了消息不丢失，这种特殊的策略会在后面详细介绍。
+
+     
+3.Storm适用的场景：
+     1、流数据处理：Storm可以用来用来处理源源不断的消息，并将处理之后的结果保存到持久化介质中。
+     2、分布式RPC：由于Storm的处理组件都是分布式的，而且处理延迟都极低，所以可以Storm可以做为一个通用的分布式RPC框架来使用。 
+     
+     
+4.Storm的架构：
+  见下图：
+  1.Nimbus:负责资源分配和任务调度。
+  2.Supervisor:负责接受Nimbus分配的任务,启动和停止属于自己管理的worker进程。
+  3.Worker:运行具体处理组件逻辑的进程。拓扑以一个或多个Worker进程的方式运行。每个Worker进程是一个物理的Java虚拟机，执行拓扑的一部分任务。
+  4.Task:worker中的每一个spout/bolt的线程称为一个task。Storm 0.8之后，task不再与物理线程对应，同一个 Spout /bolt的task可能会共享一个物理线程，该线程称为executor。 
+  
+  Storm架构中使用Spout/Bolt编程模型来对消息进行流式处理。Stream(消息流)是Storm中对数据的基本抽象,一个消息流是对一条输入数据的封装,源源不断输入的消息流以分布式的方式被处理。
+  Spout组件是消息生产者,是Storm架构中的数据输入源头,它可以从多种异构数据源读取数据,并发射消息流。Bolt组件负责接收Spout组件发射的信息流,并完成具体的处理逻辑。在复杂的业务逻辑中可以串联多个Bolt组件,在每个Bolt组件中编写各自不同的功能,从而实现整体的处理逻辑。
+
+5.Storm中涉及的概念：
+  拓扑(Topologies)：
+      一个拓扑打包了一个实时处理程序的逻辑它跟一个MapReduce的任务(job)是类似的，一个关键的区别是：一个MapReduce Job最终会结束，而一个Topology运永远运行（除非你显式的杀掉他）。
+      一个拓扑是一个复杂的多阶段的流计算，它是通过流分组(stream grouping)把Spout和Bolt连接到一起的拓扑结构，结构图的每条边代表一个Bolt订阅了其他Spout或者Bolt的输出流。
+      
+  元组(Tuple)：
+      元组是Storm提供的一个轻量级的数据格式，是一次消息传递的基本单元。一个元组是一个命名的值列表，其中的每个值都可以是任意类型的。元组是动态地进行类型转化的--字段的类型不需要事先声明。
+      在Storm中编程时，就是在操作和转换由元组组成的流。通常，元组包含整数，字节，字符串，浮点数，布尔值和字节数组等类型。要想在元组中使用自定义类型，就需要实现自己的序列化方式。
+      
+  流(Streams)：
+      流是Storm中的核心抽象。一个流由无限的Tuple元组序列组成，这些元组会被分布式并行地创建和处理。每个流声明时都被赋予了一个ID。因为只有一个流的Spout和Bolt非常常见，
+      所以OutputFieldsDeclarer提供了不需要指定ID来声明一个流的函数(Spout和Bolt都需要声明输出的流)。这种情况下，流的ID是默认的“default”。
+      
+  Spouts(喷嘴)：
+      Spout是Storm中流的来源。通常Spout从外部数据源，如消息队列中读取元组数据并吐到拓扑里。Spout可以是可靠的(reliable)或者不可靠(unreliable)的。
+      可靠的Spout能够在一个元组被Storm处理失败时重新进行处理，而非可靠的Spout只是吐数据到拓扑里，不关心处理成功还是失败了(非可靠的效率会高)。
+      Spout可以一次给多个流吐数据。此时需要通过OutputFieldsDeclarer的declareStream函数来声明多个流并在调用SpoutOutputCollector提供的emit方法时指定元组吐给哪个流。
+      Spout中最主要的函数是nextTuple，Storm框架会不断调用它去做元组的轮询。如果没有新的元组过来，就直接返回，否则把新元组吐到拓扑里。nextTuple必须是非阻塞的，因为Storm在同一个线程里执行Spout的函数。
+      Spout中另外两个主要的函数是ack和fail。当Storm检测到一个从Spout吐出的元组在拓扑中成功处理完时调用ack,没有成功处理完时调用fail。只有可靠型的Spout会调用ack和fail函数。
+      
+  Bolts：
+      在拓扑中所有的计算逻辑都是在Bolt中实现的。一个Bolt可以处理任意数量的输入流，产生任意数量新的输出流。Bolt可以做函数处理，过滤，流的合并，聚合，存储到数据库等操作。
+      Bolt就是流水线上的一个处理单元，把数据的计算处理过程合理的拆分到多个Bolt、合理设置Bolt的task数量，能够提高Bolt的处理能力，提升流水线的并发度。
+      Bolt可以给多个流吐出元组数据。此时需要使用OutputFieldsDeclarer的declareStream方法来声明多个流并在使用OutputColletor的emit方法时指定给哪个流吐数据。
+  
+  任务(Tasks)：
+      每个Spout和Bolt会以多个任务(Task)的形式在集群上运行。每个任务对应一个执行线程，流分组定义了如何从一组任务(同一个Bolt)发送元组到另外一组任务(另外一个Bolt)上。
+      可以在调用TopologyBuilder的setSpout和setBolt函数时设置每个Spout和Bolt的并发数。
+      
+  组件(Component)：
+      组件(component)是对Bolt和Spout的统称。
+      
+  流分组(Stream groupings)：
+      流分组定义了一个流在一个消费它的Bolt内的多个任务(task)之间如何分组。流分组跟计算机网络中的路由功能是类似的，决定了每个元组在拓扑中的处理路线。
+      
+      7个内置流分组策略：
+        1.洗牌分组(Shuffle grouping): 随机分配元组到Bolt的某个任务上，这样保证同一个Bolt的每个任务都能够得到相同数量的元组。
+        2.字段分组(Fields grouping): 按照指定的分组字段来进行流的分组。例如，流是用字段“user-id"来分组的，那有着相同“user-id"的元组就会分到同一个任务里，但是有不同“user-id"的元组就会分到不同的任务里。这是一种非常重要的分组方式，通过这种流分组方式，我们就可以做到让Storm产出的消息在这个"user-id"级别是严格有序的，这对一些对时序敏感的应用(例如，计费系统)是非常重要的。
+        3.Partial Key grouping: 跟字段分组一样，流也是用指定的分组字段进行分组的，但是在多个下游Bolt之间是有负载均衡的，这样当输入数据有倾斜时可以更好的利用资源。这篇论文很好的解释了这是如何工作的，有哪些优势。
+        4.All grouping: 流会复制给Bolt的所有任务。小心使用这种分组方式。在拓扑中，如果希望某类元祖发送到所有的下游消费者，就可以使用这种All grouping的流分组策略。
+        5.Global grouping: 整个流会分配给Bolt的一个任务。具体一点，会分配给有最小ID的任务。
+        6.不分组(None grouping): 说明不关心流是如何分组的。目前，None grouping等价于洗牌分组。
+        7.Direct grouping：一种特殊的分组。对于这样分组的流，元组的生产者决定消费者的哪个任务会接收处理这个元组。只能在声明做直连的流(direct streams)上声明Direct groupings分组方式。只能通过使用emitDirect系列函数来吐元组给直连流。一个Bolt可以通过提供的TopologyContext来获得消费者的任务ID，也可以通过OutputCollector对象的emit函数(会返回元组被发送到的任务的ID)来跟踪消费者的任务ID。在ack的实现中，Spout有两个直连输入流，ack和ackFail，使用了这种直连分组的方式。
+        
+  可靠性(Reliability)：
+        Storm保证了拓扑中Spout产生的每个元组都会被处理。Storm是通过跟踪每个Spout所产生的所有元组构成的树形结构并得知这棵树何时被完整地处理来达到可靠性。
+	每个拓扑对这些树形结构都有一个关联的“消息超时”。如果在这个超时时间里Storm检测到Spout产生的一个元组没有被成功处理完，那Sput的这个元组就处理失败了，后续会重新处理一遍。
+        为了发挥Storm的可靠性，需要你在创建一个元组树中的一条边时告诉Storm，也需要在处理完每个元组之后告诉Storm。这些都是通过Bolt吐元组数据用的OutputCollector对象来完成的。标记是在emit函数里完成，完成一个元组后需要使用ack函数来告诉Storm。
+  
+  Workers(工作进程):
+        拓扑以一个或多个Worker进程的方式运行。每个Worker进程是一个物理的Java虚拟机，执行拓扑的一部分任务。
+	例如，如果拓扑的并发设置成了300，分配了50个Worker，那么每个Worker执行6个任务(作为Worker内部的线程）。Storm会尽量把所有的任务均分到所有的Worker上。
+        Config.TOPOLOGY_WORKERS: 这个配置设置了执行拓扑时分配Worker的数量。
+
+
+
+Storm集群搭建与运行：
+	1、安装环境：
+	  安装包：apache-storm-1.1.0.tar.gz
+	  集群主机名称：ssspark01(nimbus)，ssspark02(supervisor)
+	  zookeeper所在地址：ssspark01，ssspark02，ssspark03
+      
+        2.步骤：
+	  2.1 解压安装包到“/home/bigdata/storm"文件夹 ：tar -zxvf apache-storm-1.1.1.tar.gz
+	  2.2 修改storm.yaml配置文件：
+	      ########### These MUST be filled in for a storm configuration
+		 storm.zookeeper.servers:
+		     - "ssspark01"
+		     - "ssspark02"
+		     - "ssspark03"
+		 nimbus.seeds: ["ssspark01"]
+		 storm.local.dir: /home/bigdata/leofu/storm/data		   
+                 nimbus.host: "10.16.46.191"  
+		 ui.port: 8080 
+		 supervisor.slots.ports:  
+		       - 6700  
+		       - 6701  
+		       - 6702  
+		       - 6703  
+	      配置解释：
+	      1、storm.zookeeper.servers表示配置Zookeeper集群地址。注意，如果zookeeper集群中使用的不是默认端口，则还需要配置storm.zookeeper.port.
+	      2、nimbus.seeds表示配置主控节点，可以配置多个。
+	      3、Nimbus和Supervisor在本地磁盘上的状态缓存信息(jar包， 配置文件等)
+	      4. Nimbus机器的地址
+	      5. storm ui的端口
+	      6. 机器上运行的进程及每个进程使用的端口
+	      
+	  2.3 scp到另外两台机器。
+		scp -r storm/ ssspark02:/home/bigdata/leofu/  
+   
+	  
+	  2.4 启动
+	      启动主控节点服务: ./storm nimbus 1>/dev/null 2>&1 &  
+              启动主控节点UI：  ./storm ui 1>/dev/null 2>&1 &    http://10.16.46.191:8080/index.html
+              启动工作节点：    ./storm supervisor 1>/dev/null 2>&1 & 
+              启动日志查看服务：./storm logviewer 1>/dev/null 2>&1 &	      
+
+	  
+	  
+	  2.5 maven 打包运行我们自己的jar
+	      1.
+	      <!--storm运行的jar需要把所依赖的第三方jar都打进去-->
+	      <plugin>
+		  <groupId>org.apache.maven.plugins</groupId>
+		  <artifactId>maven-shade-plugin</artifactId>
+		  <version>2.4.1</version>
+		  <executions>
+			  <execution>
+				  <phase>package</phase>
+				  <goals>
+					  <goal>shade</goal>
+				  </goals>
+				  <configuration>
+					<transformers>
+					     <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+						  <!--指定你要运行的main方法-->
+						  <mainClass>com.newegg.storm.windowrolling.WindowRollingTest</mainClass>
+					     </transformer>
+					</transformers>
+				  </configuration>
+			  </execution>
+		  </executions>
+	       </plugin>
+	       
+	       2.
+	       <dependency>
+			<groupId>org.apache.storm</groupId>
+			<artifactId>storm-core</artifactId>
+			<version>1.0.4</version>
+			<!--需要打包时不打进去storm-core.jar，否则会jar包冲突->
+			<scope>provided</scope>
+	        </dependency>
+		
+	     启动命令：
+               ./storm  jar /home/bigdata/leofu/storm/storm-0.0.1-SNAPSHOT.jar com.newegg.storm.windowrolling.WindowRollingTest  -C /opt/app/install/jdk1.8.0_101/bin
+
+Q&A：       
+1.storm如何做到消息不丢失的？
+	1、spout的可靠性
+	   spout会记录它所发射出去的tuple，当下游任意一个bolt处理失败时spout能够重新发射该tuple。
+	   在spout的nextTuple()发送一个tuple时，为实现可靠消息处理需要给每个spout发出的tuple带上唯一ID，并将该ID作为参数传递给SpoutOutputCollector的emit()方法：collector.emit(new Values("value1","value2"), tupleID);
+	   实际上Values extends ArrayList<Object>保障过程中，每个bolt每收到一个tuple，都要向上游应答或报错，在tuple树（DAG）上的所有bolt都确认应答，spout才会隐式调用ack()方法表明这条消息（一条完整的流）已经处理完毕，将会对编号ID的消息应答确认；处理报错、超时则会调用fail()方法。
+	2、bolt的可靠性
+	   bolt的可靠消息处理机制包含两个步骤：
+	   a、当发射衍生的tuple，需要锚定读入的tuple
+	   b、当处理消息时，需要应答或报错
+	   可以通过OutputCollector中emit()的一个重载函数锚定或tuple：collector.emit(tuple, new Values(word)); 并且需要调用一次this.collector.ack(tuple)应答。
+	   
+	一般情况下我们的bolt继承BaseBasicBolt类时，我们就不需要手动的调用ack()和fail()方法了。
+
+2.拓扑的并发度设计。
+      相关概念：
+        Worker： 
+            Worker是Spout/Bolt中运行具体处理逻辑的进程。一个拓扑可以跨一个或多个Worker进程执行。每个Worker进程是一个物理的JVM和拓扑执行所有任务的一个子集。
+	例如，如果拓扑并行度的是300，已经分配50个Worker，然后每个Worker将执行6个任务，Storm会尝试在所有Worker上均匀的发布任务。
+
+        Executor：
+            Executor称为物理线程，每个Worker可以包含多个Executor。
+	
+	Task：
+	    Task是具体的处理逻辑对象，默认情况下，一个Executor对应一个Task（一个Executor可以对应多个Task）。
+	    
+      配置拓扑的并行度：
+        1.工作进程的数量：表示集群中不同节点的拓扑可以创建多少个工作进程。
+	配置参数：TOPOLOGY_WORKERS  API进行设置：setNumWorkers()
+      
+        2.Executor(线程)的数量:执行器的数量指的是每个组件产生多少个线程。
+	API配置：setSpout(),setBolt() 
+      
+        3.Task数量：任务的数量表示的是每个组件创建多少个任务。
+	配置选项：TOPOLOGY_TASKS  API进行配置：setNumTasks(2)  
+
+
+      一个拓扑示例：
+         如下图：
+	 代码逻辑如下：
+	 Config conf = new Config();  
+	 conf.setNumWorkers(2);   	  
+	 topologyBuilder.setSpout("blue-spout", new BlueSpout(), 2);   	  
+	 topologyBuilder.setBolt("green-bolt", new GreenBolt(), 2).setNumTasks(4).shuffleGrouping("blue-spout");  	  
+	 topologyBuilder.setBolt("yellow-bolt", new YellowBolt(), 6).shuffleGrouping("green-bolt");    
+	 StormSubmitter.submitTopology("mytopology", conf,topologyBuilder.createTopology());  
+	 
+	 综上所述，该拓扑一共有两个工作进程(Worker)，2+2+6=10个执行器(Executor)，2+3+6=12个任务。
+	 因此，每个工作进程可以分配到10/2=5个执行器，12/2=6个任务。默认情况下，一个执行器执行一个任务，但是如果指定了任务的数目，则任务会平均分配到执行器中，
+	 因此，GreenBolt的实例"green-bolt"的一个执行器将会分配到4/2 = 2个任务。
+	 
+
+
+      Tips：
+        1.动态设置拓扑的并发度：Storm支持在不重启Topolog的情况下，动态的改变(增减)worker process的数目和Executor的数目，称为rebalancing。有两种方式可以实：
+          一是使用Storm Web UI提供的功能，使用Storm rebalance命令： storm rebalance mytopology -n 5 -e blue-spout=3 -e yellow-bolt=10  
+        2.topology的并行度配置一定要结合自身的业务场景和需要处理的数据量，并非并行度越高越好。      
+
+
+3. 代码实现将一个spout数据发送到多个bolt，一个bolt接受多个spout的数据？
+   1.一个bolt读入多个spout或者bolt的tuple数据流（合并流）：
+      builder.setBolt("DataParseBolt", new RedisCountBolt(), 1).shuffleGrouping("KafkaReaderSpout").shuffleGrouping("RedisCountBolt");
+      DataParseBolt会接收KafkaReaderSpout和RedisCountBolt的数据。
+     
+   2.一个spout/bolt的tuple数据流入多个bolt中（分流）：
+      builder.setSpout("spout", new RandomSentenceSpout(), 1);
+      builder.setBolt("split", new SplitSentence(), 8).shuffleGrouping("spout");
+      builder.setBolt("count", new CountWord(), 8).shuffleGrouping("spout");
+      RandomSentenceSpout中的数据会分别被SplitSentence和CountWord接受。
+
+
+Storm滑动窗口计算：
+     1.Storm滑动窗口处理的问题都可以抽象为：每隔M秒统计最近N秒内的数据的变化。
+     
+     2.Storm1.0以后提供API来快速实现窗口滑动的功能。窗口可以从时间或数量上来划分，由如下两个因素决定：
+       窗口的长度(Length)，可以是时间间隔或Tuple数量；滑动间隔(sliding Interval)，可以是时间间隔或Tuple数量。
+     比如：每5秒统计最近10秒的请求数量；每接收2个Tuple就统计最近接收的6个Tuple的平均值......。
+     一个窗口大小为10sec，滑动时间为5sec的窗口示意如下：
+     
+     3.storm1.0以后API支持的时间和数量的排列组合有如下：
+	       3.1 withWindow(Count windowLength, Count slidingInterval) ：每收到slidingInterval条数据统计最近的windowLength条数据。
+	       3.2 withWindow(Count windowLength) ：每收到1条数据统计最近的windowLength条数据。
+	       3.3 withWindow(Count windowLength, Duration slidingInterval)：每过slidingInterval秒统计最近的windowLength条数据。
+	       3.4 withWindow(Duration windowLength, Count slidingInterval)：每收到slidingInterval条数据统计最近的windowLength秒的数据。
+	       3.5 withWindow(Duration windowLength, Duration slidingInterval) ：每过slidingInterval秒统计最近的windowLength秒的数据。（常用）
+	       3.6 withWindow(Duration windowLength) ：每收到1条数据统计最近的windowLength秒的数据。
+	       
+	Window接口中的核心方法：
+	      getExpired()：相对上一次窗口过期的tuples
+	      getNew()：相对上一次窗口新增的tuples
+	      get()：当前窗口内的tuples
+
