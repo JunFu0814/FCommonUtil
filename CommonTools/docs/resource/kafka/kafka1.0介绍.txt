@@ -1,0 +1,76 @@
+Kafka 1.0 简介：
+      1.
+          1)  官方文档地址： http://kafka.apache.org/10/documentation.html#introduction
+
+          2)  kafka 可以用来做什么？
+
+               Kafka as a Messaging System   消息系统
+               Kafka as a Storage System        存储介质
+               Kafka for Stream Processing      流式处理
+
+      2. API介绍
+
+          1)  Producer API : http://kafka.apache.org/11/javadoc/index.html?org/apache/kafka/clients/producer/KafkaProducer.html  
+
+               producer是线程安全的，跨线程共享单个生产者实例通常比拥有多个实例更快。同时producer支持往指定的partition写入消息，支持一个producer写入消息到多个partitions或者topics。
+
+               producer取消了批量发送消息的接口，因为其send方法是async的future模式，每次调用增加一条记录附加到缓存时会立即返回。可以允许producer把所有个别的记录集中在一起发送，以提高性能。
+
+
+               区别之前的At Most once (消息可能会丢，但绝不会重复) 和 At Least once （消息可能会重复。但绝对不会丢）语义，producer开始支持精确一次处理语义(exactly once semantics，下称EOS)，保证消息肯定有且只会传输一次。
+
+               Kafka的EOS主要体现在3个方面：
+                   (1) 幂等producer：
+
+                               所谓幂等是指producer.send的逻辑是幂等的，即发送相同的Kafka消息，broker端不会重复写入消息，kafka保证底层日志只持久化一次。幂等性可以极大地减轻下游consumer
+
+                        系统实现消息去重的工作负担，但会有两点的限制：其一是不能保证多分区的幂等性 ，幂等是基于消息只写入单个分区的。其二是不保证跨会话实现幂等性，即使是同一个producer
+
+                        重启操作也不保证。幂等producer保证的是精确一次处理语义，因此需要尽量避免应用级别重发。API开启幂等producer支持 : 配置 enable.idempotence = true 。       
+
+
+
+
+                   (2) 事务(transaction)：
+
+                              producer支持写入消息到多个partitions或者topics，transaction保证了写入操作的原子性，即写入到多个分区的消息要么全部成功，要么全部回滚。开启transaction支持：必须要
+
+                        保证 retries != 0 (发送消息重试次数不为0)， acks = all  (所有follower副本确认接收到数据) ，enable.idempotence=true (开启幂等producer支持) ,transactional.id = "my-transactional-id" 
+
+                       ( 指定transactional.id)。
+
+ 
+                    (3) 流处理EOS：流处理本质上可看成是“读取-处理-写入”的管道，此EOS保证整个过程的操作是原子性。
+
+                         。。。
+
+
+                    上面3种EOS语义有着不同的应用范围，幂等producr只能保证单分区上无重复消息；事务可以保证多分区写入消息的完整性；而流处理EOS保证的是端到端(E2E)消息处理的EOS。
+
+
+               
+
+                producer支持自定义Partitioner来修改分区策略，例如让key相同的消息落入同一个partition中。
+
+                    默认分区策略：
+                        1）如果在kafka message中指定了分区，则使用该分区
+                        2）如果未指定分区但kafka message中存在key，则根据key的hash结果选择一个分区
+                        3）如果未指定分区且kafka message中不存在key，则以循环方式选择分区
+
+
+                    自定义分区策略的实现：1. 实现Partitioner接口重写key分区的规则  2.指定参数 partitioner.class = xx.xx.xx.ItemPartitioner 指向你自己的partitioner。 
+
+
+
+
+          2) Consumer API： http://kafka.apache.org/11/javadoc/index.html?org/apache/kafka/clients/producer/KafkaProducer.html
+
+                    Consumer不是线程安全的。每一个consumer实例在初始化的时候，都需要指定一个groupId，它决定了多个Consumer在消费同一个topic的时候，是负载均衡模式，还是Pub/Sub模式。
+
+               在负载均衡模式下，我们调用subscrible只指定topic不指定partition，这个时候partition会自动在这个group的所有对应consumer中分摊消费，新的consumer加入以后会有re-balance的过程。
+
+              为了缩短多consumer首次rebalance的时间，增加了group.initial.rebalance.delay.ms用于设置group开启rebalance的延时时间。这段延时期间允许更多的consumer加入组，避免不必要的
+
+              JoinGroup与SyncGroup之间的切换，引入这个必然带来消费延时。当然也可以调用assign函数指定consumer消费哪个topic的哪个partion中的数据。
+
+               这两种模式是互斥的，使用了subscribe，就不能使用assign。反之亦然。

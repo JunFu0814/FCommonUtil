@@ -1,0 +1,82 @@
+documentation ： http://kafka.apache.org/10/documentation.html#introduction
+
+Kafka 能够用来做什么？
+   Kafka as a Messaging System
+   Kafka as a Storage System
+   Kafka for Stream Processing
+   Putting the Pieces Together
+   
+   kafka消息格式？是否会丢失数据？是否会重复数据？
+   
+   Kafka 0.11.0.0版本正式支持精确一次处理语义(exactly once semantics，下称EOS)。Kafka的EOS主要体现在3个方面：
+      幂等producer：保证发送单个分区的消息只会发送一次，不会出现重复消息
+      事务(transaction)：保证原子性地写入到多个分区，即写入到多个分区的消息要么全部成功，要么全部回滚
+      流处理EOS：流处理本质上可看成是“读取-处理-写入”的管道。此EOS保证整个过程的操作是原子性。注意，这只适用于Kafka Streams
+　    上面3种EOS语义有着不同的应用范围，幂等producr只能保证单分区上无重复消息；事务可以保证多分区写入消息的完整性；
+      而流处理EOS保证的是端到端(E2E)消息处理的EOS。用户在使用过程中需要根据自己的需求选择不同的EOS。
+
+    
+    为了缩短多consumer首次rebalance的时间，增加了“group.initial.rebalance.delay.ms”用于设置group开启rebalance的延时时间。这段延时期间允许更多的consumer加入组，避免不必要的JoinGroup与SyncGroup之间的切换。当然凡事都是trade-off，引入这个必然带来消费延时。
+
+    4.  外部存储offset
+	消费者可以自定义kafka的offset存储位置。该设计的主要目的是让消费者将数据和offset进行原子性的存储。这样可以避免上面提到的重复消费问题。举栗说明： 
+	订阅特定分区。存储所获得的记录时，将每条记录的offset一起存储。保证数据和offset的存储是原子性的。当异步存储被异常打断时，凡已经存储的数据，都有有相应的offset记录。这种方式可以保证不会有数据丢失，也不会重复的从服务端读取。 
+	如何配置实现： 
+	1. 去使能offset自动确认：enable.auto.commit=false； 
+	2. 从ConsumerRecord中获取offset，保存下来; 
+	3. Consumer重启时，调用seek(TopicPartition, long)重置在服务端的消费记录。
+	
+	
+    kafka 消息格式：(0.8.0版本)
+    
+      1.Message => Crc Magic Attributes KeyLength Key  ValueLength Value
+        CRC	        int32	表示这条消息(不包括CRC字段本身)的校验码
+        MagicByte	int8	表示消息格式的版本，用来做后向兼容，目前值为0
+        Attributes	int8	表示这条消息的元数据，(最低两位用来表示压缩格式, 不压缩0 ,Gzip 1,Snappy 2 ,LZ4 3)
+	key length      int4    表示 Key 的内容的长度 K；
+        Key	        bytes	表示这条消息的Key，可以为null
+	value length    int4    表示 Value 的内容的长度 V；
+        Value	        bytes	表示这条消息的Value。Kafka支持消息嵌套，也就是把一条消息作为Value放到另外一条消息里面。
+
+      2.MessageSet用来组合多条Message，它在每条Message的基础上加上了Offset和MessageSize
+        MessageSet => [Offset MessageSize Message]
+	Offset	        int64	它用来作为log中的序列号，Producer在生产消息的时候还不知道具体的值是什么，可以随便填个数字进去
+        MessageSize	int32	表示这条Message的大小
+        Message	-	表示这条Message的具体内容，其格式见上一小节。
+
+
+Kafka Low Level Consumer API:
+   1.使用low api的代价：
+     partition,broker,offset对你不再透明需要自己去管理这些，并且还要处理broker leader的切换。
+     
+   2.什么情况下去使用 lowapi：
+      1.一个消息消息需要读取多次
+      2.在一个处理topic流程中，一个consumer只消费一个partition的数据。
+      3.管理实务来确保一个消息只会被消费一次(手动提交offset)。
+      
+   3.使用low api的步骤：
+     1.必须知道读哪个topic的哪个partition 
+     2.找到负责该partition的broker leader，从而找到存有该partition副本的那个broker 
+     3.自己去写request并fetch数据 
+     4.还要注意需要识别和处理broker leader的改变
+     
+Kafka High Level Consumer API:
+    1.为什么要使用high level api？
+      有时候我们读kafka消息的逻辑不关心处理消息偏移量，只是想要数据。 因此，提供high level api抽象kafka消费事件的大部分细节。
+    
+    2.可能会存在的问题
+      high level api是从zookeeper中读取offset的，offset是基于groupId进行存储的。每个group在整个kafka集群中是全局的，
+      通常在开始新consumer代码前，任何“旧”逻辑消费者都应该被关闭。因为当一个consumer加入一个正在运行的group时，
+      Kafka会将该consumer线程添加用于消费该topic并触发re-balance的过程。在re-balance过程中，Kafka会将可用partition分配给新的可用线程，也可能会将partition移至另一个进程。
+      如果混合使用新旧业务逻辑，则可能会有一些消息转到旧逻辑。
+      
+    3.使用规则：high level api的第一件事是让消费程序可以（也应该）成为一个多线程应用程序。
+      1.如果提供的consumer线程多于topic上的partition，则某些consumer线程将永远不会消费到消息。
+      2.如果提供的consumer线程小于topic上的partition，则某些consumer线程将接收来自多个partition的数据。
+      3.如果一个consumer线程有多个partition，则不会保证接收消息的顺序，除此之外partition内的offest将按顺序排列。
+      4.添加更多consumer线程将导致Kafka re-balance，可能会改变partition对consumer线程的分配。 
+      5.如果kafka没有新的消息可用，consumer线程可能会blocked。
+      6.kafka只提供一个partition内记录的总顺序，而不是topic中不同分区之间的顺序。
+        按partition排序与key分区数据的能力相结合，足以满足大多数应用程序的需求。如果需要全部数据而不是某一个partition记录，则可以通过只设置一个partition的topic来实现，
+	但这意味着每个group只能有一个consumer进程,可能会对消息的处理能力会有一定的影响。
+      
