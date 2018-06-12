@@ -1,0 +1,125 @@
+简单的说,zooKeeper = 文件系统+通知机制.
+
+  Zookeeper的核心是原子广播，这个机制保证了各个Server之间的同步。实现这个机制的协议叫做Zab协议。Zab协议有两种模式,恢复模式（选主）和广播模式（同步）。
+  为了保证事务的顺序一致性，zookeeper采用了递增的事务id号（zxid）来标识事务。所有的提议（proposal）都在被提出的时候加上 了zxid。
+  实现中zxid是一个64位的数字，它高32位是epoch用来标识leader关系是否改变，每次一个leader被选出来，它都会有一个新的epoch，标识当前属于那个leader的统治时期。低32位用于递增计数。
+  Server在工作过程中有三种状态：
+      LOOKING：当前Server不知道leader是谁，正在搜寻
+      LEADING：当前Server即为选举出来的leader
+      FOLLOWING：leader已经选举出来，当前Server与之同步
+      
+  
+  ZAB协议简析: http://blog.jobbole.com/104985/
+  
+
+1.zooKeeper的三种角色：群首（leader），追随者（follower），观察者（observer）
+   1.1 leader：负责响应所有对ZooKeeper状态变更的请求。它会将每个状态更新请求进行排序和编号，以便保证整个集群内部消息处理的FIFO。
+               ★ 关于ZooKeeper的请求类型，对于exists，getData，getChildren等只读请求，收到该请求的zk服务器将会在本地处理，因为每个服务器看到的名字空间内容都是一致的，因此如果ZooKeeper集群的负载是读多写少，并且读请求分布得均衡的话，效率是很高的。
+	         对于create，setData，delete等有写操作的请求，则需要统一转发给leader处理，leader需要决定编号、执行操作，这个过程称为一个事务（transaction）。
+   1.2 follower：响应本服务器上的读请求外，follower还要处理leader的提议，并在leader提交该提议时在本地也进行提交。
+   1.3 observer：和Follower比较相似，只有一些小区别：首先observer不属于法定人数，即不参加选举也不响应提议；其次是observer不需要将事务持久化到磁盘，一旦observer被重启，需要从leader重新同步整个命名空间。
+   
+   tips：笔者的实际应用中，我们zookeepr集群是跨E4，E11机房的，且leader是在E11上，所以每次从E4创建的node耗时都要比E11多100ms左右，这是因为create操作需要先被转发给leader，由leader需要决定编号、执行操作。
+   而E4和E11的网络延迟在100ms左右。
+
+   
+2.zooKeeper数据持久化过程
+  参数配置 ： snapCount ：每进行snapCount次事务日志输出后，触发一次快照(snapshot), 此时，ZK会生成一个snapshot.*文件，同时创建一个新的事务日志文件log.*。默认是100000.
+             （真正的代码实现中，会进行一定的随机数处理，以避免所有服务器在同一时间进行快照而影响性能）
+  1.数据持久化的意义：刚启动的server还会从磁盘快照中恢复数据和会话信息。zook会记录事务日志并定期进行快照，方便在恢复时进行状态恢复。
+  2.数据快照机制：ZooKeeper定时进行内存全量数据dump，每次数据快照都会生成磁盘上的一个snapshot文件,例如：snapshot.300000007。
+    zookeeper提供SnapshotFormatter可视化快照数据：java SnapshotFormatter snapshot.300000007
+  3.日志快照：如何查看日志快照？
+              命令格式 ：java  -classpath 需要搜索jar包的路径：需要的jar包  需要用到类    需要用到的类中的main方法的参数
+	      1.下载 slf4j-api-1.7.2.jar  zookeeper-3.4.6.jar 放入指定文件夹（根目录 / 下）
+              2.java -classpath .:slf4j-api-1.7.2.jar:zookeeper-3.4.6.jar org.apache.zookeeper.server.LogFormatter /var/lib/zookeeper/version-2/log.1
+
+
+3.zookeeper 3.5.3 版本提供的ttl功能
+
+   1. 1 zookeeper新增加的节点类型
+       1）CONTAINER ：用于诸如领导者、锁等配方的特殊用途节点，当容器的最后一个子节点被删除后，Container节点变成将来某个时候被服务器删除的候选者。
+       2）PERSISTENT_WITH_TTL ：带有TTL时间的永久节点，如果未给定TTL，它一旦没有孩子就会被删除。
+       3）PERSISTENT_SEQUENTIAL_WITH_TTL：带有TTL时间且时间戳自增的永久节点，如果未给定TTL，它一旦没有孩子就会被删除。
+       
+   1. 2 客户端使用的zookeeper3.5.3 API ：curator框架
+       <dependency>
+	 <groupId>org.apache.curator</groupId>
+	 <artifactId>curator-framework</artifactId>
+	 <version>4.0.0</version>
+       </dependency>
+       
+       创建一个TTL Node：client.create().
+		         withTtl(ttl). //指定ttl时间
+		         creatingParentContainersIfNeeded(). //创建如果不存在的父节点，并指定其为CONTAINER类型，这样可以在子节点ttl到期以后父节点会在一定时间内被系统自动删除
+		         withMode(CreateMode.PERSISTENT_SEQUENTIAL_WITH_TTL).//指定子节点的类型
+		         forPath(path,data.getBytes()); //子节点的路径以及value值
+			 
+  1.3 ：curator中Leader选举的API
+	LeaderLatch example = new LeaderLatch(client, confCenterRootPath, data);
+	example.start();
+	client.create().withMode(CreateMode.EPHEMERAL_SEQUENTIAL).forPath(confCenterRootPath, data.getBytes());//创建临时节点
+	//判断节点是不是leader(是否第一个创建)
+	Participant participant = example.getLeader();
+	String id = participant.getId();
+	data.equals(id)? true:false;
+   
+
+
+4.zooKeeper不适合作为queue的原因（不适合node太多的场景）。
+   1.1 ZK有1MB 的传输限制。 实践中ZNode必须相对较小，而队列包含成千上万的消息，非常的大。
+   1.2 如果有很多节点，ZK启动时相当的慢。 而使用queue会导致好多ZNode，需要显著增大 initLimit 和 syncLimit.
+   1.3 ZNode很大的时候很难清理。
+   1.4 当很大量的包含成千上万的子节点的ZNode时， ZK的性能会显著下降。
+   1.5 ZK的数据库完全放在内存中的，大量的Queue意味着会占用很多的内存空间。
+   Curator还是创建了各种Queue的实现。 如果Queue的数据量不太多，数据量不太大的情况下，还是可以使用的。
+  
+5.zookeeper的应用
+   1.分布式锁：基于zk的锁服务可以分为两类，一个是保持独占（成功创建ZNode的那个客户端即拥有了这把锁，删除节点就是释放锁，这种模式下未获取的客户端的Blocking逻辑需要自己在业务代码中实现），
+     另一个是控制时序的方式。
+     控制时序锁原理：见图1。
+           1.在获取分布式锁的时候在locker节点下创建临时顺序节点，释放锁的时候删除该临时节点。
+           2.客户端调用createNode方法在locker下创建临时顺序节点，然后调用getChildren(“locker”)来获取locker下面的所有子节点，注意此时不用设置任何Watcher。
+	   3.客户端获取到所有的子节点path之后，如果发现自己在之前创建的子节点序号最小，那么就认为该客户端获取到了锁。如果发现自己创建的节点并非locker所有子节点中最小的，
+	     说明自己还没有获取到锁，此时客户端需要找到比自己小一号的那个节点，然后对其调用exist()方法，同时对其注册事件监听器。
+	   4.这个被关注的节点删除，则客户端的Watcher会收到相应通知，此时再次判断自己创建的节点是否是locker子节点中序号最小的，如果是则获取到了锁，
+	     如果不是则重复以上步骤继续获取到比自己小的一个节点并注册监听。
+     
+     tips：分布式锁的另外两种实现：1.基于db使用锁表实现 2.基于redis实现
+      5.1 ：基于锁表
+            直接创建一张锁表，然后通过操作该表中的数据来实现了。当我们要锁住某个方法或资源时，我们就在该表中增加一条记录，想要释放锁的时候就删除这条记录。
+	    需要对表中某个字段做唯一性约束，这里如果有多个请求同时提交到数据库的话，数据库会保证只有一个操作可以成功，那么我们就可以认为操作成功的那个线程获得了该方法的锁。
+	    
+	    锁表存在的问题：
+	    1、这把锁强依赖数据库的可用性，数据库是一个单点，一旦数据库挂掉，会导致业务系统不可用。（数据库配置HA，双机热备）
+            2、这把锁没有失效时间，一旦解锁操作失败，就会导致锁记录一直在数据库中，其他线程无法再获得到锁。
+            3、这把锁只能是非阻塞的，因为数据的insert操作，一旦插入失败就会直接报错。没有获得锁的线程并不会进入排队队列，要想再次获得锁就要再次触发获得锁操作。
+            4、这把锁是非重入的，同一个线程在没有释放锁之前无法再次获得该锁，因为数据中数据已经存在了。
+      
+      5.2 ：基于redis实现
+            1.使用的命令：
+              SETNX key val       当且仅当key不存在时，set一个key为val的字符串，返回1；若key存在，则什么都不做，返回0。
+
+              expire key timeout  为key设置一个超时时间，单位为second，超过这个时间锁会自动释放，避免死锁。
+
+              delete key          删除key
+	    
+	    原理：
+	      获取锁的时候，使用setnx加锁，并使用expire命令为锁添加一个超时时间，超过该时间则自动释放锁，锁的value值为一个随机生成的UUID，通过此在释放锁的时候进行判断。
+              获取锁的时候还设置一个获取的超时时间，若超过这个时间则放弃获取锁。
+              释放锁的时候，通过UUID判断是不是该锁，若是该锁，则执行delete进行锁释放。
+   
+   
+   2.分布式队列:
+     分布式队列通常有两种，一种是常规的先进先出队列（例如整点抢红包的案例中，红包数目就可以维护在一个分布式队列中），另一种是要等到队列成员聚齐之后的才统一按序执行。
+     1.对于第二种先进先出队列，和分布式锁服务中的控制时序场景基本原理一致。
+     2.对于第一种，是在FIFO队列的基础上作了一个增强。通常可以在 /queue 这个znode下预先建立一个/queue/num 节点，并且赋值为n（或者直接给/queue赋值n）来表示队列大小，
+       之后每次有队列成员加入后，就判断下是否已经到达队列大小，决定是否可以开始执行了。（这种用法的典型场景是，分布式环境中，一个大任务Task A，需要在很多子任务完成（或条件就绪）情况下才能进行。
+       这个时候，凡是其中一个子任务完成（就绪），那么就去 /taskList 下建立自己的临时时序节点（CreateMode.EPHEMERAL_SEQUENTIAL），当 /taskList 发现自己下面的子节点满足指定个数，就可以进行下一步按序进行处理了。）
+       
+   3.Master选举：
+     利用 EPHEMERAL_SEQUENTIAL类型节点的特性，所有客户端创建请求都能够创建成功，并且是有创建顺序，每次选取序列号最小的那个机器作为Master，如果这个机器挂了，
+     由于他创建的节点会马上消失，那么之后最小的那个机器就是Master了。  
+ 
+参考文章：1.http://blog.csdn.net/gs80140/article/details/51496925
+          2.http://blog.csdn.net/mayp1/article/details/52026797

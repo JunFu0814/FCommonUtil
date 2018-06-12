@@ -1,0 +1,524 @@
+学习流程：
+
+  1. gc , netty , nio , socket , redis, kafka,java 设计模式
+
+  cachecloud https://github.com/sohutv/cachecloud#cc10
+  jafka https://github.com/adyliu/jafka
+  
+ 2. metaspace溢出的问题，protostuff序列化的问题。-verbose:class   ./jstat -gcmetacapacity 9
+
+    
+ 
+ 
+
+
+
+migrate （原子操作），redis key 迁移命令 ： jedis提供了api（功能不全，只支持replace不支持copy，不支持一次迁移多个key）
+bigkey hotkey问题的出现及解决。
+ 
+1.redis基础
+
+  Redis中的值可以是由string（字符串）、hash（哈希）、 list（列表）、set（集合）、zset（有序集合）、Bitmaps（位图）、 HyperLogLog、GEO（地理信息定位）等多种数据结构和算法组成。
+  Redis提供了两种持久化方式：RDB和 AOF。http://blog.csdn.net/canot/article/details/52886923
+  Redis 集群规范：http://redisdoc.com/topic/cluster-spec.html#redis  HASH_SLOT = CRC16(key) mod 16384
+  
+  
+ redis 全局命令：
+        查看所有键 ： keys *  遍历所有的key，时间复杂度O(n),产线环境慎用。
+	查看键总数 ： dbsize  直接获取Redis内置的键总数变量，时间复杂度是O(1)。
+	判断key是否存在 exists key 
+	删除key(多个)   del key [key ...] 
+	设置key过期时间 expire key seconds 
+	查看key的剩余过期时间  ttl key 
+	查看key的数据结构类型  type key
+	设置值命令 set key value [ex seconds] [px milliseconds] [nx|xx]
+                   ex seconds：为键设置秒级过期时间。（同 setex命令）
+		   px milliseconds：为键设置毫秒级过期时间。
+		   nx：键必须不存在，才可以设置成功，用于添加。（同 setnx命令，分布式锁基于redis的实现就是基于setnx命令）
+		   xx：与nx相反，键必须存在，才可以设置成功，用于更新。
+        批量操作命令：mget mset 批量操作命令可以有效提高开发效率，减少多次网络IO的开销。redis服务端的处理性能已经足够高，网络可能成为性能瓶颈。
+	
+	
+  redis 客户端命令：
+     migrate ：MIGRATE host port key destination -db timeout [COPY][REPLACE]  key 原子性地从当前实例传送到目标实例的指定数据库上，一旦传送成功，key保证会出现在目标实例上，而当前实例上的 key 会被删除。
+     append ： APPEND key value                                              key已经存在且值为字符串，会把 value 追加到原来值，如果key不存同set命令。
+     incr ：   INCR key                                                      key的数值执行原子的加1操作。(java 内部的计数操作是基于cas实现的，会有一定的cpu开销，redis是单线程命令顺序执行，不存在这个问题)
+     getset：  GETSET key value                                              和set一样会设置值，同时会返回键原来的值
+     randomkey : 随机返回一个key
+     scan ：scan采用渐进式遍历的方式来解决keys命令可能带来的阻塞问题。
+            scan cursor [match pattern] [count number]
+	         cursor是必需参数，cursor是一个游标，第一次遍历从0开始，每一次的scan遍历完都会返回当前游标的值，直到游标值为0表示遍历所有的key结束。
+                 match pattern是可选参数，它的作用的是做模式的匹配，这点和keys的模式匹配很像。
+                 count number是可选参数，它的作用是表明每次要遍历的键个数，默认值是10，此参数可以适当增大。	    
+            
+     
+  redis key迁移的三种方式：
+     move、dump+restore、migrate是Redis发展过程中三种迁移键的方式，其中move命令基本废弃，migrate命令用原子性的方式实现了dump+restore，
+     并且支持批量操作，是Redis Cluster实现水平扩容的重要工具。
+  
+     
+  redis架构：Redis使用了单线程架构和I/O多路复用模型来实现高性能的内存数据库服务，所有命令在一个队列里排队等待被执行。
+             redis单线程达到每秒万级别的处理能力原因？
+	    1.纯内存访问 
+	    2.非阻塞I/O，使用epoll作为I/O多路复用技术的实现，自身的事件处理模型将epoll中的连接、读写、关闭都转换为事件，不在网络I/O上浪费过多的时间。
+	    3.单线程避免线程切换和资源竞争带来的消耗。
+	    
+ 
+  1.redis 数据结构和内部编码 ：Redis存储键值对使用的是hashtable的数据结构（所以get操作时间复杂度是O(1)），但是Redis为每种数据类型都提供了多种内部编码方式，
+                             其选择对于使用者来说是透明的，Redis会根据实际情况自动调整。	http://blog.csdn.net/gqtcgq/article/details/50240383
+   
+   查看一个键的内部编码方式命令 ： object encoding KEY
+  
+   1.1.String ：
+       REDIS_ENCODING_RAW 0     /* Raw representation */    
+       REDIS_ENCODING_INT 1     /* Encoded as integer */ 
+       REDIS_ENCODING_EMBSTR 8  /* Embedded sds string encoding */  	       
+       
+	  RAW编码方式使用简单动态字符串来保存字符串对象，INT编码方式以整数保存字符串数据且仅能用long类型值表达的字符串。
+       正常情况下String类型的键值是以RAW存储的，当键值内容可以用一个64位有符号整数表示时，Redis会将键值转换成long类型来存储，这比使用存储字符串更加节省空间。
+       当redisObject中的LRU值没有意义的时候(实例没有设置maxmemory限制或者maxmemory-policy设置的淘汰算法中不计算LRU值时)， 0-10000之间的OBJ_ENCODING_INT编码的字符串对象将进行共享，
+       以节省存储空间。
+       
+       OBJ_ENCODING_EMBSTR_SIZE_LIMIT 39
+       
+       tips：Redis 3.0版本开始字符串引入了EMBSTR编码方式，长度小于OBJ_ENCODING_EMBSTR_SIZE_LIMIT的字符串将以EMBSTR方式存储。
+	     EMBSTR方式的意思是 embedded string ，字符串的空间将会和redisObject对象的空间一起分配，两者在同一个内存块中。
+   
+   1.2 Hash(散列类型): 
+	REDIS_ENCODING_HT 2      /* Encoded as hashtable */   
+	REDIS_ENCODING_ZIPMAP 3 (已经废弃) /* Encoded as zipmap */  
+   
+	hash-max-ziplist-entries 512
+	hash-max-ziplist-value 64		
+	
+	当散列类型键的字段个数少于hash-max-ziplist-entries，且每个字段名和字段值的长度都小于hash-max-ziplist-value时（字节），Redis就会使用zipList来存储该键，
+	否则就会使用hashtable。hashtable可以实现O(1)时间复杂度的赋值取值等操作，其字段和字段值都是使用redisObject存储的。zipList是一种紧凑的编码格式，
+	它牺牲了部分读取性能以换取极高的空间利用率，适合在元素较少时使用。
+  
+  1.3 List(列表类型) 
+       REDIS_ENCODING_LINKEDLIST 4 /* Encoded as regular linked list */ 
+       REDIS_ENCODING_ZIPLIST 5 /* Encoded as ziplist */ 
+  
+       list-max-ziplist-entries 512
+       list-max-ziplist-value 64
+       
+       当散列类型键的字段个数少于st-max-ziplist-entries，且每个字段名和字段值的长度都小于hash-max-list-max-ziplist-value时（64字节），Redis就会使用zipList来存储该键，
+       否则就会使用linkedlist。linkedlist编码方式即双向链表，链表中的每个元素是用redisObject方式存储的。ziplist是一种紧凑的编码格式，它牺牲了部分读取性能以换取极高的空间利用率，适合在元素较少时使用。
+  
+  1.4 Set(集合) 
+     REDIS_ENCODING_INTSET 6  /* Encoded as intset */   
+     REDIS_ENCODING_HT 2      /* Encoded as hashtable */ 
+  
+     set-max-intset-entries 512
+     
+     当集合中的所有元素都是整数且元素的个数小于配置文件中的set-max-intset-entries（默认是512）时Redis会使用intset编码存储该集合，否则会使用hashtable来存储。
+     insert编码以有序的方式存储元素（所以使用smembers命令获得的结果是有序的），节省空间，可以使用二分算法query，但add del元素操作都需要调整后面元素的内存位置，所以当集合中的元素太多时性能较差。
+     
+     tips:在Redis 3.2版本之前，一般的链表使用linkedlist编码，之后所有的链表都是用quicklist编码。两者都是使用基本的双端链表数据结构，区别是quicklist每个节点的值都是使用ziplist进行存储的，更加节省空间。
+     
+  1.5 Zset(有序集合类型): 
+      REDIS_ENCODING_LINKEDLIST 4 /* Encoded as regular linked list */ 
+      REDIS_ENCODING_SKIPLIST 7  /* Encoded as skiplist */   
+    
+      zset-max-ziplist-entries  128  
+      zset-max-ziplist-value  64  
+
+    当集合中的所有元素都是整数且元素的个数小于配置文件中的zset-max-intset-entries（默认是128）时Redis会使用ziplist编码存储该集合，否则会使用skiplist来存储。
+    skiplist用来存储元素的分数及其到元素值的映射以实现排序的功能。Redis对跳跃列表的实现进行了几点修改，其中包括允许跳跃列表中的元素（即分数）相同，
+    还有为跳跃列表每个节点增加了指向前一个元素的指针以实现倒序查找。
+    
+    tips：跳表的数据结构？
+    
+  总结：（空间换时间还是时间换空间？取决于自身实际业务）
+      1.链表(List),哈希(Hash),有序集合(Sorted Set)在成员较少，成员值较小的时候都会采用压缩列表(ZIPLIST)编码方式进行存储。压缩列表简单来说就是一系列连续的内存数据块，其内存利用率很高，但增删改查效率较低，所以只会在成员较少，值较小的情况下使用。
+      2.在Redis 3.2版本之后所有的链表都是用quicklist编码。quicklist也是基于双端链表数据结构，但每个节点的值都是使用ziplist进行存储的，更加节省空间。
+      3.在Redis 3.0版本之后引入字符串引入了EMBSTR编码方式，通过key，value共享空间减少内存使用。
+	
+  2.redis客户端服务端的通信协议
+    Redis制定了RESP（Redis Serialization Protocol，Redis序列化协议）实现客户端与服务端的正常交互，这种协议简单高效，既能够被机器解析，又容易被我们识别。
+    
+    2.1 RESP的规定一条命令的格式如下，CRLF代表"\r\n"。
+        *<参数数量> CRLF
+	  N
+        $<参数1的字节数量> CRLF
+         <参数1> CRLF
+         ...
+        $<参数N的字节数量> CRLF
+         <参数N>
+	 
+    2.2 以 set hello world 命令为例：
+       
+          *3表示命令参数个数是3个
+	  $3/$5/$5 表示每个参数的长度为3/5/5个字节
+	  \r\n 表示换行
+
+        *3\r\n$3\r\nSET\r\n$5\r\nhello\r\n$5\r\nworld\r\n
+   
+    2.3 RESP返回结果格式
+         5种返回格式的编码：
+            状态回复：在RESP中第一个字节为"+"。      set命令
+	    错误回复：在RESP中第一个字节为"-"。      ser一个错误的命令
+	    整数回复：在RESP中第一个字节为"："。     incr命令
+	    字符串回复：在RESP中第一个字节为"$"。    get命令
+	    多条字符串回复：在RESP中第一个字节为"*"。mget命令
+	    
+	redis-cli只能看到最终的执行结果，因为其本身就是按照RESP进行结果解析的，所以看不到中间结果。如果想看到中间结果可以使用nc命令、telnet命令、甚至写一个socket程序进行模拟。
+  
+  3.redis请求路由：moved转向 ask转向。
+         moved转向：通常在集群模式下，Redis接收任何key相关命令时首先计算键对应的slot，再根据slot找出所对应的node节点，如果node节点是自身，则处理key命令；
+	            否则回复MOVED重定向错误，通知客户端请求正确的node节点。使用redis-cli命令时，可以加入-c参数支持自动重定向，这个过程是在redis-cli
+                    内部维护，实质上是client端接到MOVED信息之后再次发起请求，因为节点对于不属于它的键命令只回复重定向响应，并不负责转发。
+	
+	 ask转向：出现在在线迁移solt和数据的过程中。会出现一部数据在源节点，一部分数据在目标节点的情况，这时候我们需要通过ask转向目前节点获取剩下的数据。
+	 
+	 tips：1.二者有着本质的区别，ASK重定向说明集群正在进行slot数据迁移，客户端无法知道什么时候迁移完成，因此只能是临时性的重定向，客户端不会更新slots缓存信息。
+	         但是MOVED重定向说明键对应的槽已经明确指定到新的节点，因此需要更新slots缓存信息。
+               
+               2.通常在集群模式下每次command执行客户端连接的节点是不一定的，每次操作会随机获取活跃节点连接，首先该节点会判断command是不是可以执行的命令，如可以执行客户端
+                 会先计算key对应的slot，再根据slot找出对应的node，如果是当前node就会直接执行command，如果不是会给client返回MOVED重定向错误，通知其请求正确的节点(实际上这是
+		 两次的客户端请求)，它的弊端是很明显的。 所以目前绝大数的Redis客户端都采用Smart客户端，Smart客户端通过在内部维护slot→node的映射关系，本地就可实现键到节点的查找，
+		 从而保证IO效率的最大化，而MOVED重定向负责协助Smart客户端更新slot→node映射。  
+  
+  4. redis 慢查询(slowlog)
+     Redis配置项：slowlog-log-slower-than 预设阈值，命令执行时间超过阈值的才会被记录（单位：微秒us）。
+                  slowlog-max-len 慢查询日志最大存储长度，当队列满了以后会以FIFO的方式出队列。
+     
+     动态设置redis参数并持久化到本地：  
+	      config set slowlog-log-slower-than 默认10ms
+	      config set slowlog-max-len  默认128
+	      config rewrite （配置文件持久化）
+	      
+     相关命令：
+          1.获取满查询日志：slowlog get [n]
+	        日志的四个组成
+		    1) (integer) 81015              慢查询日志的标识id
+	            2) (integer) 1519709146         发生时间戳
+	            3) (integer) 18269              命令耗时（不包括命令排队和网络传输时间）
+	            4) 1) "DEL"                     执行命令和参数
+	               2) "detail:redisJob-manufactory"
+
+          2.获取慢查询日志列表当前的长度：slowlog len
+	  3.慢查询日志重置（实际是对列表做清理操作）：slowlog reset
+
+  5.pipeline机制：
+     1. redis客户端执行一条命令的过程(RTT过程)：1）发送命令 2）命令排队 3）命令执行 4）返回结果。
+     2. pipeline机制能将一组Redis命令进行组装，通过一次RTT传输给Redis，再将这组Redis命令的执行结果按顺序返回给客户端，
+        因此pipeline不是原子的它执行n次命令，但是整个过程需要1次RTT过程。这样可以减少网络的开销，在网络环境不好的时候
+	效果很明显。
+
+    基于pipeline机制，可以对批量的hash，list，set操作进行优化。
+  
+  6.redis的事务机制和Lua
+   1）事务机制：
+      1.Redis提供了简单的事务功能，将一组需要一起执行的命令放到multi(开始)和exec(结束)两个命令之间，它们之间的命令是原子顺序执行的，
+        如果要停止事务的执行，可以使用discard命令代替exec命令即可。但是它不支持事务中的回滚特性，同时无法实现命令之间的逻辑关系计算。
+      
+      2.事务中错误的处理机制：
+        1.命令错误：属于语法错误，会造成整个事务无法执行。
+		  eg. 将set 写成 sett
+        2.语法错误：其语法是正确的，因此之前的部分命令已经执行成功，开发人员需要自己修复这类问题。
+		  eg. 误把sadd命令写成了zadd命令，zadd之前的命令都会正常执行成功
+    
+      3.watch机制：某些应用场景需要在事务之前，确保事务中的key没有被其他客户端修改过，才执行事务，否则不执行（类似乐观锁）。
+        在执行multi之前执行watch key的命令，如果事务中keybei别的客户端修改了，则事务执行失败。
+
+   2）Redis与Lua：
+      1.Lua是一种轻量级的脚本语言，它是由C语言实现的，作为嵌入式程序移植到其他应用程序。它提供了如下几种数据类型：booleans（布尔）、numbers（数值）、strings（字符串）、tables（表格）。
+        扩展：学习Lua语言的语法和内置函数(http://www.lua.org/)。
+      
+      2.Lua在Redis中的使用：
+        1）执行Lua脚本有两种方法：eval和evalsha 
+	   1.1）eval ：
+	        1.执行命令 ： eval 脚本内容 key个数 key列表 参数列表
+	        如果lua脚本过长，可以用redis-cli --eval直接执行文件。
+	   1.2）evalsha ：将Lua脚本加载到Redis服务端(内存中)，得到该脚本的SHA1校验和，evalsha命令使用SHA1作为参数可以直接执行对应Lua脚本，这样既可以避免每次发送lua脚本的开销
+	                  也可以是脚本功能得到服用。
+			  1.script load ：加载脚本到redis中。
+			    script load "$(cat XXX.lua)"
+                            返回SHA1值 7413dc2440db1fea7c0a0bde841fa68eefaf149c
+			    
+			  2.执行命令：evalsha 脚本SHA1值 key个数 key列表 参数列表
+			  
+			  
+	2）Lua的内置Redis API：
+	   2.1）redis.call
+	        redis.call("set", "hello", "world")
+                redis.call("get", "hello")
+		执行效果：eval 'return redis.call("get", KEYS[1])' 1 hello	     
+			  
+           2.2）edis.pcall
+	        redis.call执行失败，那么脚本执行结束会直接返回错误，而redis.pcall会忽略错误继续执行脚本。
+		
+       3.为什么我们要用Lua脚本功能？ 
+	  1.Lua脚本可以将多条命令一次性打包，有效地减少网络开销。
+	  2.Lua脚本可以定制的符合自身业务需求命令，而且命令常驻redis内存可以复用。
+	  3.Lua脚本在Redis中是原子执行的。
+	  
+	  但是如果Lua脚本比较耗时，甚至Lua脚本存在问题，那么此时Lua脚本的执行会阻塞Redis，影响Redis的性能。
+	
+	4.Redis管理Lua脚本命令
+	  1.script load "$(cat XXX.lua)" 加载Lua脚本到Redis内存中
+	  2.script exists sha1           判断sha1是否已经加载到Redis内存中
+          3.script flush	         清除Redis内存已经加载的所有Lua脚本
+	  4.script kill                  杀掉正在执行的Lua脚本
+	        
+	        
+    todo sort命令，
+
+  7.redis阻塞问题：
+      产生阻塞的一般原因：
+         内在原因：
+	         1.API或者数据结构使用不合理：慢查询和bigkeys
+		   把高时间复杂度的命令修改为低复杂度的，如hgetall --> hmget ,尽量不在产线环境使用keys，sort的危险命令
+		   把大对象数据缩减成小对象数据，避免一次命令操作操作太多数据。（将一个大对象的数据尽量视业务需求拆分成多个小对象数据，客户端可以通过一次查询操作执行多条命令（pipeline）
+		   来一次性获取所有数据，这样既可以减少客户端的网络IO消耗，也可以避免服务端bigkeys引起的慢查询）。
+		   如何发现大对象？使用redis-cli --bigkeys命令
+		 
+		 2.cpu饱和：单线程的Redis处理命令时只能使用一个CPU，而CPU饱和是指Redis把单核CPU使用率跑到接近100%。
+		       1.使用top命令识别cpu使用率高的REDIS进程。
+		       2.使用统计命令redis-cli -h {ip} -p {port} --stat命令获取当前Redis使用情况
+		         通过分析其它每秒平均处理的请求数目判断当前redis实例是否接近饱和（6w+左右接近饱和）。这种情况下只能通过水平扩展集群规模来分摊OPS压力。
+		       3.只有几百或几千OPS的Redis实例就接近CPU饱和，有可能使用了高算法复杂度的命令。使用info commandstats来分析出redis命令不合理开销时间。
+		 
+		 3.持久化阻塞：开启了持久化功能的Redis节点，持久化引起主线程阻塞的操作主要有fork阻塞、AOF刷盘阻塞、HugePage写操作阻塞。
+		 
+	外在原因：
+	        1.cpu资源竞争：redis是典型的cpu密集型应用，不推荐和其他多核cpu密集型服务部署在一起。别的服务在过度消耗cpu的情况下会严重影响redis吞吐量。
+		
+		2.内存交换(swap): 交换分区主要是在内存不够用的时候，将部分内存上的数据交换到swap空间上，以便让系统不会因内存不够用而导致oom或者更致命的情况出现。
+		  如何识别redis内存交换:
+		    1.查询redis进程号：redis-cli -h {ip} -p {port} info server | grep process_id
+                    2.根据进程号查询redis内存交互信息：cat /proc/{process_id}/smaps | grep Swap	
+                      如果交换量都是0kb或者个别4kb，说明redis进程内存没有被交换。
+                
+		  预防swap：1.保证机器可用内存充足 2.确保所有redis实例都设置最大可用内存(maxmemory)
+		  
+		3.网络问题：
+		  1.连接拒绝
+		     网络闪断。
+		     Redis连接拒绝：当redis的的连接数大于maxcilents（默认10000）时，会拒绝新的连接连入。info stats | grep rejected_connections可以统计被拒绝的连接数目。
+		     Redis链接溢出：进程限制 && Tcp backlog队列溢出
+		  2.网络延迟：使用ping查看不同服务器之间的网络延迟数
+		  3.网卡软中断
+    
+    
+      Tips：定制redis日志，如加入日志监控，记录阻塞redis的ipport可以帮助我们快速定位问题，同时可以对redis部署的机器做全面监控。
+      
+  8.理解Redis内存：
+    1.内存消耗
+      1.1 内存使用统计：info memory
+          used_memory:  Redis分配器分配的内存总量，也就是内部存储所有的数据内存占用率。
+          used_memory_rss: 从操作系统系统角度看Redis进程所占用的物理内存总量。
+	  used_memory_peak：内存使用的最大值，表示used_memory的峰值。
+	  mem_fragmentation_ratio = used_memory_rss/used_memory ：
+	          当 mem_fragmentation_ratio > 1,多出的部分内存并没有用于数据存储，而是被内存碎片所消耗，如果两者相差很大，说明碎片率严重。	  
+                  当 mem_fragmentation_ratio < 1,一般出现在操作系统把Redis内存交换（Swap）到硬盘导致,这种情况下由于硬盘速度远远慢于内存，Redis性能会变得很差，甚至僵死。		
+  
+      1.2 内存消耗划分：一个Redis进程内消耗主要包括自身内存+对象内存+缓冲内存+内存碎片，其中Redis空进程自身内存消耗非常少可以忽略不计。
+          1.2.1：对象内存
+	         对象内存是Redis内存占用最大的一块，存储着用户所有的数据。Redis所有的数据都采用key-value数据类型，对象内存消耗可以简单理解为sizeof（keys）+sizeof（values）。
+		 
+          1.2.2：缓冲内存
+	         1)客户端缓冲：所有接入到Redis服务器TCP连接的输入输出缓冲。输入缓冲无法控制，最大空间为1G，如果超过将断开连接。
+		               输出缓冲通过参数client-output-buffer-limit控制，默认值如下：
+			       普通客户端：client-output-buffer-limit normal 0 0 0  缓冲区不做限制
+                               从客户端：client-output-buffer-limit slave 256mb 64mb 60 缓冲区的大小大于256mb之后就会断开连接 || 缓冲区的大小大于64mb且超过了60s断开连接
+                               发布订阅客户端：client-output-buffer-limit pubsub 32mb 8mb 60 缓冲区的大小大于32mb之后就会断开连接 || 缓冲区的大小大于8mb且超过了60s断开连接
+			       
+	         2)复制积压缓冲区：2.8版本以后提供可重用的固定大小缓冲区用于实现部分复制功能，repl-backlog-size参数控制，默认参数1MB
+		 
+		 3)AOF缓冲区：用于在Redis重写期间保存最近的写入命令。其消耗用户无法控制，取决于AOF重写时间和写入命令数，通常很小。
+         
+	   1.2.3：缓存碎片
+	       1)内存碎片的产生：
+	         1.Redis默认的内存分配器采用jemalloc，其分配内存策略一般采用固定范围的内存块进行分配。例如jemalloc在64位系统中将内存空间划分为：小、大、巨大三个范围
+	           ·小：[8byte]，[16byte，32byte，48byte，...，128byte]，
+		   ·大：[4KB，8KB，12KB，...，4072KB]
+                   ·巨大：[4MB，8MB，12MB，...]
+		   对于一个5k的对象，jemalloc可能会通常都是分配一个8k的内存块去保存，而不是几个不连续的内存块，因此剩下的3k空间就变成的内存碎片无法再使用。
+		   
+		 2.频繁做更新操作（如append字符串追加，setrange从指定的offset处开始覆盖value的长度的操作），频繁的append操作会使数据大小超过预先分配的内存大小，
+		   此时jemalloc就会分配新的内存块，之前的内存空间被释放产生内存碎片。
+		   
+		 
+		 3.大量过期键删除后，删除的空间无法充分利用。例如有一批不连续且内存对象大小约为6kb的数据过期产生了大量的不连续内存空间，之后再保存的数据的如果大部分都
+		   大于6kb的话，这些空间就很难被继续利用。因此这个场景下数据对齐就显得十分重要。
+		   
+		 4.redis在rdb时也会可能导致碎片率升高：rdb机制使用了copy-on-write，在很高的update负载下，redis需要更多的内存才能完成rdb。
+		   
+	       
+	       2)常见解决高内存碎片的方式：
+	         
+		 通常：mem_fragmentation_ratio > 1 时表示存在内存碎片，值越大内存碎片率越高，jemalloc在没有任何碎片时碎片率约在1.03左右。
+		 
+	         1.数据对齐：数据尽量采用数字类型或者固定长度字符串等存储，有助于内存释放以后继续有效利用。
+		 2.安全重启：重启节点可以做到内存碎片重新整理，可以将碎片率过高的主节点转换为从节点，进行安全重启。
+
+        1.3 子进程消耗：主要指执行AOF/RDB重写时Redis创建的子进程内存消耗。Redis执行fork操作产生的子进程内存占用量对外表现为与父进程相同，理论上需要一倍的物理内存来完成重写操作。
+	   
+            
+     2.内存管理：
+       2.1 设置内存上限 ：使用maxmemory参数限制最大可用内存。防止使用内存超过服务器物理内存，当超出内存上限maxmemory时使用LRU等删除策略释放空间。
+       
+       2.2 动态调整内存上限 ：config set maxmemory 10GB
+       
+       2.3 内存回收策略：
+           1)到达过期时间的键对象删除 
+	     惰性删除：客户端读取超时的键时会执行删除操作并返回空。这种策略可以节省CPU成本，不需要单独维护TTL链表来处理过期键的删除。单独使用这种策略存在过期的键一直没被访问无法删除
+	               内存空间得不到释放。（我们的冷门item就会出现这样的场景）
+	     
+	     定时任务删除：Redis内部维护一个定时任务，默认每秒运行10次（通过配置hz控制）。删除过期键逻辑采用了自适应算法，根据键的过期比例、使用快慢两种速率模式回收键。
+	     
+	   2)内存使用达到maxmemory上限时触发内存溢出控制策略 config get maxmemory-policy
+	     maxmemory-policy配置（6种）
+	       1.noeviction：默认策略不会删除任何数据，拒绝所有写入操作并返回客户端错误信息（error）OOM command not allowed when used memory，此时Redis只响应读操作。
+	       2.volatile-lru：根据LRU算法删除设置了超时属性（expire）的键，直到腾出足够空间为止。如果没有可删除的键对象，回退到noeviction策略。
+               3.allkeys-lru：根据LRU算法删除键，不管数据有没有设置超时属性，直到腾出足够空间为止。
+               4.allkeys-random：随机删除所有键，直到腾出足够空间为止。
+               5.volatile-random：随机删除过期键，直到腾出足够空间为止。
+               6.volatile-ttl：根据键值对象的ttl属性，删除最近将要过期数据。如果没有，回退到noeviction策略。
+	       
+      3.内存优化
+        3.1 理解readObject对象：redis存储的数据都使用redisObject来封装，包括string、hash、list、set、zset在内的所有数据类型。
+	    readObject字段说明；
+	              type ：当前对象使用的数据类型 （redis type命令5中返回值：string、hash、list、set、zset）
+	              encoding ：key在redis内部存储的编码类型 （redis会根据key的情况动态调整编码类型）
+		      lru  ：记录对象最后一次被访问的时间 （用于辅助LRU算法删除键数据。）
+		      refcount ：记录当前对象被引用的次数，当refcount=0时，可以安全回收当前对象空间（object refcount{key}获取当前对象引用。）
+		      *ptr ：与对象的数据内容相关，如果是整数，直接存储数据；否则表示指向数据的指针。
+   
+        3.2优化手段
+	    1.缩减键值对象：最直接的方式 
+	      key长度：如在设计键时，在完整描述业务情况下，键值越短越好
+	      value长度：序列化以后再存储
+	     
+	    2.共享对象池：
+	      共享对象池是指Redis内部维护[0-9999]的整数对象池。10000以内的整数类型redisObject对象都会共用共享对象池中的对象，利于节省空间。
+	      经测试，使用共享对象池后，相同的数据内存使用降低30%以上。
+	      
+	      2.1 为什么开启maxmemory和LRU淘汰策略后对象池无效？
+	          每个对象最后访问时间存储在redisObject对象的lru字段。对象共享意味着多个引用共享同一个redisObject，这时lru字段也会被共享，导致无法获取每个对象的最后访问时间。
+	      
+	      2.2 为什么只有整数对象池？
+                  首先整数对象池复用的几率最大，其次对象共享的一个关键操作就是判断相等性，整数比较算法时间复杂度为O（1），只保留一万个整数为了防止对象池浪费。
+	
+	    3.字符串优化
+	      3.1 Redis字符串结构：简单动态字符串（simple dynamic string，SDS），有如下特点
+	                        · O(1)时间复杂度获取：字节数组(buf[])、已用长度(len)、未用长度(free)。
+				· 可用于保存字节数组，支持安全的二进制数据存储。
+				· 内部实现空间预分配机制，降低内存再分配次数。
+				· 惰性删除机制，字符串缩减后的空间不释放，作为预分配空间保留。
+	      
+	      3.2 预分配机制： 会带来一定的内存浪费，尽量减少字符串频繁修改操作如append、setrange，改为直接使用set修改字符串，降低带来的内存浪费和内存碎片化。
+	      
+	      3.3 字符串重构： 指不一定把每份数据作为字符串整体存储，像json这样的数据可以使用hash结构，既节省内存同时可以使用hmget、hmset命令支持字段的部分读取修改，而不用每次整体存取。
+	    
+           4.编码优化：了解Redis内部string、list、hash、set、zet等存储数据的内部编码，所谓编码就是具体使用哪种底层数据结构来实现，编码不同将直接影响数据的内存占用和读写效率。
+	               
+		       object encoding{key} 命令可以获取编码类型。具体的type与encoding对应关系见第一节 1.redis 数据结构和内部编码。
+		       Redis作者想通过不同编码实现效率和空间的平衡，编码类型转换在Redis写入数据时自动完成，这个转换过程是不可逆的，转换规则只能从小内存编码向大内存编码转换。
+	      
+	         hash类型一个优化实例：
+	         一个hash类型的数据，其中有一个属性的长度为70个字节。在使用默认配置的hash类型存储时内存消耗会比较高，因为默认配置下hash-max-ziplistvalue默认值是64，
+		 超过这个长度Redis会采用hashtable编码方式，hashtable消耗了大量内存（但是查询效率会提高），因此我们可以修改hash-max-ziplistvalue = 72来调整该hash类型
+		 内部存储为ziplist，这调整可以节省很大一部分的内存空间。
+		 
+		 tips：之前在redis阻塞一章某个案例提到，hset命令算法复杂度只有O（1）但某些Redis实例平均耗时却达到135微秒，十分不合理正常情况耗时应该在10微秒以下。
+		       原因是该Redis实例为了追求低内存使用量，过度放宽ziplist使用条件（修改了hash-max-ziplist-entries和hash-max-ziplist-value配置）。
+		       进程内的hash对象平均存储着上万个元素，而针对ziplist的操作算法复杂度在O（n）到O（n2）之间，操作变得更慢且更消耗CPU容易造成cpu饱和，
+                       这对redis来说十分危险，因此一切优化都要结合自身情况来。		       
+		
+           5.控制键的数目：在客户端预估键规模，把大量键分组映射到多个hash结构中降低键的数量。
+       	     
+	 
+   9.集群（RedisCluster）
+      9.1 数据分布：
+        1)数据分布理论：分布式数据库首先要解决把整个数据集按照分区规则映射到多个节点的问题，把数据集划分到多个节点上，每个节点负责整体数据的一个子集。
+	                常见的分区规则有哈希分区和顺序分区两种。
+			
+	2)常见的哈希分区规则:
+           1. 节点取余分区  hash（key）% N 计算出哈希值，用来决定数据映射到哪一个节点上，这种方式优点是简单，但是当节点数量变化时，数据节点映射关系全部需要重新计算，
+	                    会导致数据的重新迁移。
+
+           2. 一致性哈希分区 为系统中每个节点分配一个token，范围一般在0~232，这些token构成一个哈希环。数据读写执行节点查找操作时，先根据key计算hash值，然后顺时针找到第一个大于
+                             等于该哈希值的token节点。
+	  
+	   3. 虚拟槽分区 
+	         Slot(槽)：分散度良好的哈希函数把所有数据映射到一个固定范围的整数集合中，整数定义为槽（slot）。
+		 Redis数据分区：Redis Cluser采用虚拟槽分区，所有的键根据哈希函数映射到0~16383整数槽内。
+		                计算公式：slot=CRC16（key）&16383。
+				每一个节点负责维护一部分槽以及槽所映射的键值数，因此每次节点扩容时，只要把一部分的slot映射到新的节点上即可。
+		Redis虚拟槽分区的特点：
+		     1.解耦数据和节点之间的关系，简化的扩容的难度
+		     2.节点自身维护slot的映射关系，无需客户端或者代理服务器维护slot分区元数据
+		     3.支持节点、槽、键之间的映射查询，适用于数据路由、在线伸缩等场景。
+	     
+	   
+        3)redis cluster 功能限制
+          1.key批量操作支持有限，目前只支持string的批量操作（mget，mset），list，hash等不支持批量操作。
+	  2.key事务操作支持有限，多key在同一节点上的事务操做，分布在不同节点不支持。
+	  3.key是数据分区的最小粒度，不能将一个大的键值对象如hash、list等映射到不同的节点。
+	  4.不支持多数据库空间，集群模式下只能使用一个数据库空间，即db0。
+	  5.复制结构只支持一层，从节点只能复制主节点，不支持嵌套树状复制结构。
+	  
+	
+      9.2 集群搭建：
+          1)节点准备 
+	        修改所有节点的配置文件，并启动节点： ./redis-server conf/redis-6379.conf
+          2)节点握手
+	        所有节点在集群模式下的节点通过Gossip协议彼此通信，达到感知对方的过程： cluster meet {ip} {port}，
+          3)分配slot 
+                Redis集群把所有的数据映射到16384个槽中 ：redis-cli -h 127.0.0.1 -p 6379 cluster addslots {0...5461}
+ 
+          4)使用redis-trib.rb搭建集群
+	     1.redis-trib.rb是采用Ruby实现的Redis集群管理工具，使用之前需要安装Ruby依赖环境。
+	     2.节点准备 
+	     3.创建集群 
+	       redis-trib.rb create --replicas 1 127.0.0.1:6481 127.0.0.1:6482 127.0.0.1:6483127.0.0.1:6484 127.0.0.1:6485 127.0.0.1:6486
+	       --replicas参数指定集群中每个主节点配备几个从节点
+
+       9.3 节点通信
+           1)通信流程
+        
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  9.参数配置项，持久化策略。
+  
+  
+     
+  10.redis 优化方向：（内存优化，I/O优化，配置优化）
+  
+    1.简化键名和键值是最直观的减少内存占用的方式。  
+    
+    2.redis提供了流水线（Pipeline）功能，这样客户端能将一批命令一次性传到 Redis，减少了网络的开销。客户端和服务端网络延迟越大，pipeline效果越明显，
+      这为性能优化提供了一个方向，可以结合自身业务减少网络IO次数。
+    
+      2.1 mget操作和pipeline的区别：mget操作是原子的，其批量操作只有一次网络I/O和一次命令执行。Pipeline不是原子的，它是把多个命令一次发送，所以只有一次网络I/O
+          但是多个命令在redis服务端是顺序执行的，所以是多次的命令操作。
+      
+      2.2 redis mget ：keys集合对应的slot相同时支持mget操作
+    
+      2.3 lettuce 的 mget API命令原理? 根据key 计算solt落点。相同落点的key进行mget命令操作
+      
+      2.4 按node获取connection并行操作（pipeline操作）
+      
+          tip:不同key落在同一node的概率比落在同一个slot的概率大得多。目前测试按node获取connection效果比lettuce mget API要好。
+      
+    3.使用hash_tag优化（局限性大，只适合特定的业务场景）
+         是否可以用在我们relationtable上？
+    
+    4.通过配置参数优化
+      
+      
