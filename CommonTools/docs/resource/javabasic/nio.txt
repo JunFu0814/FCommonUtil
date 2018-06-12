@@ -1,0 +1,131 @@
+NIO介绍：Java NIO是从Java 1.4版本开始引入的一个新的IO API，可以替代标准的Java IO API。
+    
+1.Java NIO 由以下几个核心部分组成： 
+Channels：基本上，所有的 IO 在NIO 中都从一个Channel 开始。Channel 有点象流。 数据可以从Channel读到Buffer中，也可以从Buffer 写到Channel中。
+	  NIO中的一些主要Channel的实现：
+		FileChannel：从文件中读写数据。
+		DatagramChannel：能通过UDP读写网络中的数据。
+		SocketChannel：能通过TCP读写网络中的数据。
+		ServerSocketChannel：可以监听新进来的TCP连接，像Web服务器那样。对每一个新进来的连接都会创建一个SocketChannel。
+	  
+	  channels的特点：		  
+	    1.既可以从通道中读取数据，又可以写数据到通道。但流的读写通常是单向的。
+	    2.通道可以异步地读写。
+	    3.通道中的数据总是要先读到一个Buffer，或者总是要从一个Buffer中写入
+	       
+Buffers：一块固定大小的缓冲区域。
+	  NIO中的一些主要Channel的实现：
+	       ByteBuffer
+	       CharBuffer
+	       DoubleBuffer
+	       FloatBuffer
+	       IntBuffer
+	       LongBuffer
+	       ShortBuffer
+	       
+	  Buffer的基本用法 
+	  使用Buffer读写数据一般遵循以下四个步骤： 
+	     1.写入数据到Buffer
+	     2.调用flip()方法，从写模式切换到读模式
+	     3.从Buffer中读取数据
+	     4.调用clear()方法或者compact()方法
+	     
+	  缓冲区（Buffer）本质上是一块可以写入数据，然后可以从中读取数据的内存。这块内存被包装成NIO Buffer对象，并提供了一组方法，用来方便的访问该块内存。
+	  它有三个属性；position和limit的含义取决于Buffer处在读模式还是写模式。不管Buffer处在什么模式，capacity的含义总是一样的。
+	     1.capacity：Buffer作为一个内存块有固定的大小值，也叫“capacity”.你只能往里写capacity个byte、long，char等类型。一旦Buffer满了，需要将其清空才能继续写数据。 
+	     
+	     2.position:写模式下，position表示当前的位置。初始的position值为0.当一个byte、long等数据写到Buffer后，position会向前移动到下一个可插入数据的Buffer单元。
+			 position最大可为capacity – 1。 
+			 读模式下，也是从某个特定位置读。当将Buffer从写模式切换到读模式，position会被重置为0。当从Buffer的position处读取数据时，position向前移动到下一个可读的位置。 
+	     
+	     3.limit:写模式下，Buffer的limit表示你最多能往Buffer里写多少数据，limit等于Buffer的capacity。 
+		     读模式下，limit表示你最多能读到多少数据。因此，当切换Buffer到读模式时，limit会被设置成写模式下的position值。换言之，你能读到之前写入的所有数据（limit被设置成已写数据的数量，这个值在写模式下就是position） 
+	     
+
+
+Selectors； NIO中能够检测一到多个NIO通道，并能够知晓通道是否为诸如读写事件做好准备的组件。这样，一个单独的线程可以管理多个channel，从而管理多个网络连接。 
+	    
+	   (1)为什么使用Selector?  仅用单个线程来处理多个Channels的好处是，只需要更少的线程来处理通道很方便。
+	   (2)Selector的创建。     通过调用Selector.open()方法创建一个Selector，Selector selector = Selector.open();
+	   (3)向Selector注册通道  Channel和Selector配合使用，必须将channel注册到selector上。通过register()方法来，channel.configureBlocking(false);  
+														  SelectionKey key = channel.register(selector,Selectionkey.OP_READ);
+	       Selector使用时，Channel必须处于非阻塞模式下。这意味着不能将FileChannel与Selector一起使用，因为FileChannel不能切换到非阻塞模式。而套接字通道都可以。 
+	       register()方法的第二个参数。这是一个“interest集合”，意思是在通过Selector监听Channel时对什么事件感兴趣。可以监听四种不同类型的事件：Connect,Accept,Read,Write
+
+
+
+2.IO与NIO的区别；
+2.1 IO	                NIO
+Stream oriented	        Buffer oriented
+Blocking IO	        Non blocking IO
+			Selectors
+			
+1：IO是面向流的，NIO是面向缓冲区的。 Java IO面向流意味着每次从流中读一个或多个字节，直至读取所有字节，它们没有被缓存在任何地方。
+   此外，它不能前后移动流中的数据。如果需要前后移动从流中读取的数据，需要先将它缓存到一个缓冲区。
+   NIO的数据读取到一个它稍后处理的缓冲区，需要时可在缓冲区中前后移动。但是，这需要检查是否该缓冲区中包含所有您需要处理的数据。而且，需确保当更多的数据读入缓冲区时，不要覆盖缓冲区里尚未处理的数据。 
+
+2. IO的各种流是阻塞的。当一个线程调用read() 或 write()时，该线程被阻塞，直到有一些数据被读取，或数据完全写入。该线程在此期间不能再干任何事情了。
+   NIO的非阻塞模式，使一个线程从某通道发送请求读取数据，但是它仅能得到目前可用的数据，如果目前没有数据可用时，就什么都不会获取。而不是保持线程阻塞，所以直至数据变的可以读取之前，该线程可以继续做其他的事情。
+   
+   
+   
+   
+3.NIO的API介绍：
+3.1 Buffer的API
+1.Buffer的分配：  ByteBuffer buf = ByteBuffer.allocate(48);//分配一个48个字节容量的buffer
+2.向Buffer中写数据：  
+    2.1 从Channel写到Buffer。 int bytesRead = inChannel.read(buf);
+    2.2 put()方法写到Buffer里。buf.put((byte)120);  
+3.buf.flip();//将Buffer从写模式切换到读模式。调用flip()方法会将position设回0，并将limit设置成之前position的值。 
+4.从Buffer中读取数据 
+    4.1:从Buffer读取数据到Channel。int bytesWritten = inChannel.write(buf); 
+    4.2:使用get()方法从Buffer中读取数据。byte aByte = buf.get();//一次读取一个字节的数据
+5. buf.rewind() //重读Buffer中的所有数据。limit保持不变，position将被设回0。
+6. buf.clear()与 buf.compact() //clear()方法会清空整个缓冲区,compact()方法只会清除已经读过的数据.
+7. buf.mark()与 buf.reset() //mark()方法可以标记Buffer中的一个特定position,之后可以通过调用Breset()方法恢复到这个position。
+8. equals()与compareTo()
+   8.1 equals():当满足下列条件时，表示两个Buffer相等
+       有相同的类型（byte、char、int等）。
+       Buffer中剩余的byte、char等的个数相等。
+       Buffer中所有剩余的byte、char等都相同。
+   8.2 compareTo()比较两个Buffer的剩余元素(小于)
+       第一个不相等的元素小于另一个Buffer中对应的元素。
+       所有元素都相等，但第一个Buffer比另一个先耗尽(第一个Buffer的元素个数比另一个少)
+   tips：剩余元素是从 position到limit之间的元素。
+
+3.2 FileChannel的API：
+1.channel.write() 和 channel.read()
+2.log pos = channel.position();channel.position(pos +123);//在FileChannel的某个特定位置进行数据的读/写操作
+3.long fileSize = channel.size();//FileChannel实例的size()方法将返回该实例所关联文件的大小
+4.channel.truncate(1024)//使用FileChannel.truncate()方法截取一个指定长度de文件
+5.channel.force(true)//FileChannel.force()方法将通道里尚未写入磁盘的数据强制写到磁盘上
+ 
+4.分散（Scatter）/聚集（Gather）
+4.1 分散（scatter）从Channel中读取是指在读操作时将读取的数据写入多个buffer中。
+  代码示例：
+	  ByteBuffer header = ByteBuffer.allocate(128);  
+	  ByteBuffer body   = ByteBuffer.allocate(1024);  
+	  ByteBuffer[] bufferArray = { header, body };    
+	  channel.read(bufferArray);
+	  
+  buffer首先被插入到数组，然后再将数组作为channel.read() 的输入参数。read()方法按照buffer在数组中的顺序将从channel中读取的数据写入到buffer，
+  当一个buffer被写满后(必须填满当前的buffer)，channel紧接着向另一个buffer中写。
+  
+4.2 聚集（gather） 写入Channel是指在写操作时将多个buffer的数据写入同一个Channel。
+  代码示例：
+	  ByteBuffer header = ByteBuffer.allocate(128);  
+	  ByteBuffer body   = ByteBuffer.allocate(1024);  
+	  ByteBuffer[] bufferArray = { header, body };  
+	  channel.write(bufferArray); 
+  
+  buffers数组是write()方法的入参，write()方法会按照buffer在数组中的顺序，将数据写入到channel，注意只有position和limit之间的数据才会被写入。
+
+
+5.通道之间的数据传输：    
+在NIO中，如果两个通道中有一个是FileChannel，那你可以直接将数据从一个channel传输到另外一个channel。
+
+5.1 transferFrom() && transferTo()   
+  toChannel.transferFrom(position, count, fromChannel);  
+  fromChannel.transferTo(position, count, toChannel); 
+方法的输入参数position表示从position处开始向目标文件写入数据，count表示最多传输的字节数。如果源通道的剩余空间小于 count 个字节，则所传输的字节数要小于请求的字节数。
+tips：在SoketChannel的实现中，SocketChannel只会传输此刻准备好的数据（可能不足count字节）。因此，SocketChannel可能不会将请求的所有数据(count个字节)全部传输到FileChannel中。
