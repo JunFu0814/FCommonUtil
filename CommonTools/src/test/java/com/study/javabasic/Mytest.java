@@ -5,6 +5,10 @@ package com.study.javabasic;
  */
 public class Mytest {
 
+    /**
+     * 通过该例子深入理解java类加载的机制
+     * @param args
+     */
     public static void main(String[] args) {
 
         SingleTon singleTon = new SingleTon();
@@ -20,6 +24,7 @@ public class Mytest {
         System.out.println("count4=" + singleTon4.count4);
 
     }
+
 }
 
 class SingleTon {
@@ -40,7 +45,6 @@ class SingleTon1 {
     private static SingleTon1 singleTon = new SingleTon1();
     public static int count1;
     private SingleTon1() {
-        System.out.println(1111);
         count1++;
     }
 

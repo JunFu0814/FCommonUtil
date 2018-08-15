@@ -7,9 +7,6 @@
   
  2. metaspace溢出的问题，protostuff序列化的问题。-verbose:class   ./jstat -gcmetacapacity 9
 
-    
- 
- 
 
 
 
@@ -481,17 +478,7 @@ bigkey hotkey问题的出现及解决。
            1)通信流程
         
   
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
+
   
   
   9.参数配置项，持久化策略。

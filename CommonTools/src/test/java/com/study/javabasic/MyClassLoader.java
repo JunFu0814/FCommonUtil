@@ -1,8 +1,7 @@
 package com.study.javabasic;
 
-import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.FileInputStream;
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 
@@ -26,38 +25,49 @@ public class MyClassLoader extends ClassLoader {
         this.path = path;
     }
 
+    private byte[] loadByte(String name) throws Exception {
+        name = name.replaceAll("\\.", "/");
+        FileInputStream fis = new FileInputStream(path + "/" + name
+                + ".class");
+        int len = fis.available();
+        byte[] data = new byte[len];
+        fis.read(data);
+        fis.close();
+        return data;
+
+    }
+
     /**
      * 重写findClass方法
      */
     @Override
-    public Class<?> findClass(String name) {
-        byte[] data = loadClassData(name);
-        return this.defineClass(name, data, 0, data.length);
-    }
-
-    public byte[] loadClassData(String name) {
+    protected Class<?> findClass(String name) throws ClassNotFoundException {
         try {
-            name = name.replace(".", "//");
-            FileInputStream is = new FileInputStream(new File(path + name + ".class"));
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            int b = 0;
-            while ((b = is.read()) != -1) {
-                baos.write(b);
-            }
-            return baos.toByteArray();
+            byte[] data = loadByte(name);
+            return defineClass(name, data, 0, data.length);
         } catch (Exception e) {
             e.printStackTrace();
+            throw new ClassNotFoundException();
         }
-        return null;
     }
 
     public static void main(String[] args) throws ClassNotFoundException, IllegalAccessException, InstantiationException, NoSuchMethodException, InvocationTargetException {
         //自定义类加载器的加载路径
-        MyClassLoader myClassLoader=new MyClassLoader("D:\\test");
-        Class c=myClassLoader.loadClass("com.newegg.spring.eureka.manager.aop.Test");
+        MyClassLoader myClassLoader=new MyClassLoader("D:/test");
+        Class c=myClassLoader.loadClass("java.lang.String");
         if(c!=null){
+
+            Method[] methods =  c.getDeclaredMethods();
+            Field[]  fields =  c.getDeclaredFields();
+            for(Method method : methods){
+                System.out.println(method.getName());
+            }
+            for(Field field : fields){
+                System.out.println(field.getName());
+            }
+
             Object obj=c.newInstance();
-            Method method=c.getMethod("say", null);
+            Method method=c.getMethod("hello", null);
             method.invoke(obj, null);
             System.out.println(c.getClassLoader().toString());
         }
